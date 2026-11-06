@@ -10,7 +10,7 @@ mod statusline;
 use crate::cache::CacheStore;
 use crate::cli::{
     AgentOrder, AgentSelection, BrandColors, ConfigureOptions, FieldSet, LowQuotaAlert, PaneTitles,
-    PercentStyle, SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace,
+    PercentStyle, SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace, ThemeMode,
 };
 use crate::model::Harness;
 use crate::prefs;
@@ -68,7 +68,8 @@ pub fn run(
         // needs them to recognise its own work and restore the backup.
         let fields = resolved_fields(None, Some(&cache));
         let brand = resolved_brand_colors(None, Some(&cache));
-        herdr::uninstall(agents, full, fields, brand)?;
+        let theme = resolved_theme(None);
+        herdr::uninstall(agents, full, fields, brand, theme)?;
         if full {
             font::uninstall(cache.root())?;
             // Herdr keeps this view until something clears it, so an uninstall
@@ -138,6 +139,8 @@ pub fn run(
         cache.set_fields(fields)?;
         prefs::write(prefs::FIELDS, &fields.as_list())?;
         let brand = resolved_brand_colors(options.brand_colors, Some(&cache));
+        let theme = resolved_theme(options.theme);
+        prefs::write(prefs::THEME, theme.as_str())?;
         let alert = resolved_low_quota_alert(options.low_quota_alert, Some(&cache));
         // A new threshold has never warned about anything yet. Without this,
         // lowering it would stay silent for a provider already warned about at
@@ -147,7 +150,7 @@ pub fn run(
         }
         cache.set_low_quota_alert(alert)?;
         prefs::write(prefs::LOW_QUOTA_ALERT, &alert.to_string())?;
-        herdr::apply(agents, layout, gap, fields, brand, pane_titles)?;
+        herdr::apply(agents, layout, gap, fields, brand, pane_titles, theme)?;
         for note in font::install(cache.root())? {
             println!("{note}");
         }
@@ -183,9 +186,10 @@ pub fn run(
         let statusline_pace = resolved_statusline_pace(options.statusline_pace, cache.as_ref());
         let fields = resolved_fields(options.fields, cache.as_ref());
         let brand = resolved_brand_colors(options.brand_colors, cache.as_ref());
+        let theme = resolved_theme(options.theme);
         let order = resolved_agent_order(options.agent_order, cache.as_ref());
         let alert = resolved_low_quota_alert(options.low_quota_alert, cache.as_ref());
-        herdr::check(agents, layout, gap, fields, brand, pane_titles)?;
+        herdr::check(agents, layout, gap, fields, brand, pane_titles, theme)?;
         println!("Quota percentages show {} quota.", percent.suffix());
         println!("Sidebar pacing: {}.", pacing.as_str());
         println!("Claude statusLine pace: {}.", statusline_pace.as_str());
@@ -300,6 +304,12 @@ pub(crate) fn resolved_low_quota_alert(
             prefs::read(prefs::LOW_QUOTA_ALERT).and_then(|value| LowQuotaAlert::parse(&value))
         })
         .or_else(|| cache.and_then(CacheStore::low_quota_alert))
+        .unwrap_or_default()
+}
+
+pub(crate) fn resolved_theme(explicit: Option<ThemeMode>) -> ThemeMode {
+    ThemeMode::from_arg_or_env(explicit)
+        .or_else(|| prefs::read(prefs::THEME).and_then(|value| ThemeMode::parse(&value)))
         .unwrap_or_default()
 }
 

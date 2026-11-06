@@ -6,6 +6,7 @@
 #   ./install.sh --agent claude,codex
 #   ./install.sh --watch-interval-seconds 300
 #   ./install.sh --sidebar-layout packed
+#   ./install.sh --theme auto
 #   ./install.sh --pane-titles off
 #   ./install.sh --row-gap 0
 #   ./install.sh --quota-percent used
@@ -49,6 +50,10 @@
 # --brand-colors is accepted for compatibility with older installs but has no
 # effect; identity text follows the sidebar theme and icons show status colour.
 #
+# --theme auto (default) reads Herdr's [theme] config and follows
+# theme.auto_switch between the light and dark palettes. dark/light force one
+# palette when the host terminal's appearance report does not reach the plugin.
+#
 # --agent-order quota (default) keeps each Space contiguous and ranks by
 # least quota left inside the space; tabs keeps tab order but draws the tabs
 # that share an account together. Both replace the panel's sort until it is
@@ -76,6 +81,7 @@ source "$ROOT/scripts/herdr-action.sh"
 WATCH_INTERVAL_SECONDS=""
 AGENTS=""
 SIDEBAR_LAYOUT=""
+THEME=""
 PANE_TITLES=""
 ROW_GAP=""
 QUOTA_PERCENT=""
@@ -100,6 +106,11 @@ while (($# > 0)); do
     --sidebar-layout)
       (($# >= 2)) || { printf 'error: missing value for %s\n' "$1" >&2; exit 1; }
       SIDEBAR_LAYOUT="$2"
+      shift 2
+      ;;
+    --theme)
+      (($# >= 2)) || { printf 'error: missing value for %s\n' "$1" >&2; exit 1; }
+      THEME="$2"
       shift 2
       ;;
     --pane-titles)
@@ -173,6 +184,10 @@ case "$SIDEBAR_LAYOUT" in
   ""|packed|stacked|gauges) ;;
   *) die "sidebar-layout must be packed, stacked, or gauges" ;;
 esac
+case "$THEME" in
+  ""|auto|dark|light) ;;
+  *) die "theme must be auto, dark, or light" ;;
+esac
 case "$PANE_TITLES" in
   ""|on|off) ;;
   *) die "pane-titles must be on or off" ;;
@@ -232,6 +247,7 @@ write_plugin_pref() {
 write_plugin_pref agents "$(agents_pref_value "$AGENTS")"
 write_plugin_pref watch-interval-seconds "$WATCH_INTERVAL_SECONDS"
 write_plugin_pref sidebar-layout "$SIDEBAR_LAYOUT"
+write_plugin_pref theme "$THEME"
 write_plugin_pref pane-titles "$PANE_TITLES"
 write_plugin_pref row-gap "$ROW_GAP"
 write_plugin_pref quota-percent "$QUOTA_PERCENT"

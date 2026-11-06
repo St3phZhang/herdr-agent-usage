@@ -147,6 +147,11 @@ pub enum Command {
         /// percentage or below. `off` (default) never notifies.
         #[arg(long, value_parser = parse_low_quota_alert)]
         low_quota_alert: Option<LowQuotaAlert>,
+        /// Plugin-owned sidebar colors: auto (follow Herdr's theme), dark, or
+        /// light. `auto` is the default and follows `[theme]` plus
+        /// `theme.auto_switch` in Herdr's config.
+        #[arg(long, value_enum)]
+        theme: Option<ThemeMode>,
     },
     /// Render the settings pane shown in the Herdr popup pane.
     Settings,
@@ -566,6 +571,7 @@ pub struct ConfigureOptions {
     pub brand_colors: Option<BrandColors>,
     pub agent_order: Option<AgentOrder>,
     pub low_quota_alert: Option<LowQuotaAlert>,
+    pub theme: Option<ThemeMode>,
 }
 
 /// Whether recurring quota windows show quota or spending pace in the sidebar.
@@ -643,6 +649,52 @@ impl StatuslinePace {
         match name.trim().to_ascii_lowercase().as_str() {
             "off" | "false" => Some(Self::Off),
             "on" | "true" => Some(Self::On),
+            _ => None,
+        }
+    }
+
+    pub fn from_arg_or_env(value: Option<Self>) -> Option<Self> {
+        if value.is_some() {
+            return value;
+        }
+        std::env::var(Self::ENV)
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+    }
+}
+
+/// How the plugin's own sidebar colors follow Herdr's appearance.
+///
+/// `auto` reads `[theme]` from Herdr's config and follows `auto_switch`; the
+/// explicit modes are an escape hatch for terminals whose light/dark report
+/// does not reach the plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum ThemeMode {
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub const ENV: &'static str = "HERDR_AGENT_QUOTA_THEME";
+    /// The order the settings pane steps through.
+    pub const CHOICES: [Self; 3] = [Self::Auto, Self::Dark, Self::Light];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "auto" | "follow" => Some(Self::Auto),
+            "dark" => Some(Self::Dark),
+            "light" => Some(Self::Light),
             _ => None,
         }
     }
@@ -1167,6 +1219,17 @@ impl AgentSelection {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_theme_mode_round_trips_through_its_stored_form() {
+        for mode in ThemeMode::CHOICES {
+            assert_eq!(ThemeMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(ThemeMode::parse(" AUTO "), Some(ThemeMode::Auto));
+        assert_eq!(ThemeMode::parse("follow"), Some(ThemeMode::Auto));
+        assert_eq!(ThemeMode::parse("sepia"), None);
+        assert_eq!(ThemeMode::default(), ThemeMode::Auto);
+    }
 
     #[test]
     fn an_agent_order_round_trips_through_its_stored_form() {

@@ -79,7 +79,68 @@ pub struct ProviderOutcome {
 }
 
 pub fn run(providers: &[Provider], force: bool, json: bool) -> Result<()> {
+    maybe_reapply_theme();
     run_internal(providers, force, json, None)
+}
+
+/// Herdr does not emit a plugin event when its theme changes. Refresh runs on
+/// every agent event, focus change, and manual refresh action, so this is the
+/// cheapest place to notice a new light/dark palette and rewrite the rows.
+///
+/// Gated on Herdr's plugin environment: a direct CLI refresh, and the tests
+/// that invoke it, must not rewrite the user's sidebar config as a side
+/// effect. The signature file keeps this a no-op until the palette actually
+/// changes.
+fn maybe_reapply_theme() {
+    let event = std::env::var("HERDR_PLUGIN_EVENT").unwrap_or_default();
+    let action = std::env::var("HERDR_PLUGIN_ACTION_ID").unwrap_or_default();
+    // Startup and the explicit refresh action are the cheap, intentional
+    // moments. Agent-status events fire constantly and must not spawn an
+    // appearance probe or rewrite config on every turn.
+    if event != "startup" && action != "refresh" {
+        return;
+    }
+    let Ok(cache) = CacheStore::from_env() else {
+        return;
+    };
+    let Ok(path) = crate::configure::herdr::config_path() else {
+        return;
+    };
+    let Ok(current) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    // A machine that never installed the sidebar should not gain rows just
+    // because a refresh hook ran.
+    if !current.contains("$quota_icon") {
+        return;
+    }
+    let mode = crate::configure::resolved_theme(None);
+    let palette = crate::theme::resolve_with(&current, mode, crate::theme::detect_appearance());
+    let signature = format!("{}|{palette:?}", mode.as_str());
+    let marker = cache.root().join("theme-applied.sig");
+    if std::fs::read_to_string(&marker).ok().as_deref() == Some(signature.as_str()) {
+        return;
+    }
+
+    let agents = AgentSelection::from_args_or_env(&[]);
+    let layout = crate::configure::resolved_sidebar_layout(None, Some(&cache));
+    let gap = crate::configure::resolved_row_gap(None, Some(&cache));
+    let fields = crate::configure::resolved_fields(None, Some(&cache));
+    let brand = crate::configure::resolved_brand_colors(None, Some(&cache));
+    let pane_titles = crate::configure::resolved_pane_titles(None, Some(&cache));
+    if crate::configure::herdr::apply(&agents, layout, gap, fields, brand, pane_titles, mode)
+        .is_err()
+    {
+        return;
+    }
+
+    let herdr = std::env::var_os("HERDR_BIN_PATH").unwrap_or_else(|| "herdr".into());
+    let _ = Command::new(herdr)
+        .args(["server", "reload-config"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = std::fs::write(marker, signature);
 }
 
 /// Restore the Herdr state this plugin owns, then refresh once.

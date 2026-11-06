@@ -166,6 +166,7 @@ herdr plugin pane open --plugin herdr-agent-usage --entrypoint settings --focus
 | Sidebar pacing | 关闭（默认）保留额度百分比和进度条；开启后在 5h/7d 行显示节奏 |
 | StatusLine pace | 开启（默认）保留现有的额度节奏输出；关闭后不改 Claude 自己的 statusLine 输出 |
 | Layout | `gauges`（默认）在每个额度数字旁加进度条；`packed` 合并相关字段；`stacked` 将字段分行显示 |
+| Color theme | `auto`（默认）跟随 Herdr 的 `[theme]` 与 `auto_switch`；`dark` / `light` 强制使用某一套配色 |
 | Row gap | Agent 之间保留零行或一行空白 |
 | Watch interval | 30 秒–1 小时，默认 60 秒 |
 | Fields | 默认开启提供方、主题、模型、上下文、短期／长期／月度额度；cache 与 TTL 可选 |
@@ -176,6 +177,8 @@ herdr plugin pane open --plugin herdr-agent-usage --entrypoint settings --focus
 
 方向键或空格修改，`a` 应用，`q` 关闭。脚本配置选项见 `./install.sh --help`。
 Claude 状态栏节奏是独立开关，默认开启以保持升级前行为；可用 `./install.sh --statusline-pace off` 关闭，关闭时仍会正常采集额度观测并供侧栏使用。
+
+插件自有的品牌状态色和额度严重度色会从 Herdr 的内置主题解析。`auto` 会读取 Herdr `config.toml` 的 `[theme]`（包括 `auto_switch`、`dark_name`、`light_name`，以及 `theme.custom` 下的 `text`、`green`、`yellow`、`red`、`teal`）；`dark` / `light` 用于终端没有把明暗外观传给插件时强制指定。更换 Herdr 主题后，按一次刷新键（`prefix+shift+r`）、执行 **Install / repair**，或在设置里应用一次，即可重写十六进制颜色；Herdr 不会为换主题发出插件事件。
 
 ## 数据来源与边界
 

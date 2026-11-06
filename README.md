@@ -187,6 +187,7 @@ herdr plugin pane open --plugin herdr-agent-usage --entrypoint settings --focus
 | Sidebar pacing | Off (default) keeps quota percentages and gauges; on shows signed pace on 5h/7d rows |
 | StatusLine pace | On (default) preserves the existing binding-window pace segment; off leaves Claude's statusLine output unchanged |
 | Layout | `gauges` (default) adds a meter beside each quota number; `packed` groups related fields; `stacked` gives each field a row |
+| Color theme | `auto` (default) follows Herdr's `[theme]` and `auto_switch`; `dark` or `light` force one palette |
 | Row gap | Zero or one blank line between agents |
 | Watch interval | 30 seconds–1 hour; default 60 seconds |
 | Fields | Provider, topic, model, context, short/long/monthly quota on by default; cache and TTL optional |
@@ -203,7 +204,17 @@ Enable sidebar pacing, or opt out of the separate Claude statusLine pace, during
 ```sh
 ./install.sh --sidebar-pacing on
 ./install.sh --statusline-pace off
+./install.sh --theme auto
 ```
+
+Plugin-owned brand/status and quota-severity colors are resolved from Herdr's
+built-in theme palette. `auto` reads `[theme]` in Herdr's `config.toml`,
+including `auto_switch`, `dark_name`, `light_name`, and the `text`, `green`,
+`yellow`, `red`, and `teal` entries under `theme.custom`. Use `dark` or `light`
+when the host terminal's appearance report does not reach the plugin. After
+changing Herdr's theme, press the refresh key (`prefix+shift+r`), run
+**Install / repair**, or apply from Settings once to rewrite the hex values;
+Herdr does not emit a plugin event for theme changes.
 
 Paced sidebar rows read like `5h -6% 45 min`: window, signed percentage-point
 headroom versus the remaining clock, and time left. Negative means usage is

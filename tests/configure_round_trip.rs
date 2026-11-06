@@ -1,7 +1,12 @@
 use herdr_agent_quota::cache::CacheStore;
-use herdr_agent_quota::cli::AgentSelection;
-use herdr_agent_quota::configure::herdr::{add_quota_row, remove_quota_row};
+use herdr_agent_quota::cli::{
+    AgentSelection, BrandColors, FieldSet, PaneTitles, SidebarLayout, SidebarRowGap,
+};
+use herdr_agent_quota::configure::herdr::{
+    add_quota_row, add_quota_row_with_titles_and_palette, remove_quota_row,
+};
 use herdr_agent_quota::model::{Harness, Provider, ProviderSnapshot, UsageWindow, WindowKind};
+use herdr_agent_quota::theme::ThemePalette;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -284,19 +289,54 @@ fn default_herdr_rows_become_plane_provider_usage_and_topic_lines() {
     assert!(!applied.contains("fg = \"#c8cdd6\""));
     assert!(applied.contains("row_gap = 0 # herdr-agent-usage"));
     assert!(applied.find("$quota_topic").unwrap() < applied.find("$quota_5h_normal").unwrap());
-    assert!(applied.contains("fg = \"#82d978\""));
-    assert!(applied.contains("fg = \"#e4b957\""));
+    assert!(applied.contains("fg = \"#a6e3a1\""));
+    assert!(applied.contains("fg = \"#f9e2af\""));
     assert!(!applied.contains("fg = \"#c6d768\""));
     assert!(!applied.contains("fg = \"#e2bd58\""));
-    assert!(applied.contains("fg = \"#f16f7e\""));
+    assert!(applied.contains("fg = \"#f38ba8\""));
     assert!(!applied.contains("fg = \"#eceef2\""));
     assert!(!applied.contains("selection_bg"));
     assert!(!applied.contains("active_row_bg"));
     assert!(!applied.contains("[ui.sidebar.agents.rows_by_agent]"));
     assert!(sidebar_has_status_icon_rules(&applied), "{applied}");
-    assert!(applied.contains("fg = \"#e9e9f0\""));
+    assert!(applied.contains("fg = \"#cdd6f4\""));
     assert!(applied.contains("fg = \"#f9e2af\""));
     assert!(applied.contains("fg = \"#94e2d5\""));
+}
+
+#[test]
+fn light_palette_replaces_every_dark_only_color() {
+    let light = ThemePalette::catppuccin_latte();
+    let applied = add_quota_row_with_titles_and_palette(
+        "",
+        &AgentSelection::SUPPORTED,
+        SidebarLayout::Packed,
+        SidebarRowGap::default(),
+        FieldSet::all(),
+        BrandColors::On,
+        PaneTitles::Off,
+        &light,
+    )
+    .unwrap();
+    for color in [
+        light.idle.as_str(),
+        light.safe.as_str(),
+        light.warning.as_str(),
+        light.danger.as_str(),
+    ] {
+        assert!(
+            applied.contains(color),
+            "light color {color} missing:\n{applied}"
+        );
+    }
+    assert!(
+        !applied.contains("#cdd6f4"),
+        "dark idle survived:\n{applied}"
+    );
+    assert!(
+        !applied.contains("#a6e3a1"),
+        "dark safe survived:\n{applied}"
+    );
 }
 
 #[test]
@@ -404,7 +444,7 @@ fn context_is_the_penultimate_row_and_model_shares_provider_style() {
             .and_then(toml_edit::Value::as_inline_table)
             .and_then(|table| table.get("fg"))
             .and_then(toml_edit::Value::as_str);
-        assert_eq!(fg, Some("#e9e9f0"), "{token}");
+        assert_eq!(fg, Some("#cdd6f4"), "{token}");
     }
     assert!(agents.get("rows_by_agent").is_none(), "{applied}");
 }

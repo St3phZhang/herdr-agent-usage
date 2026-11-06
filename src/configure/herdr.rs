@@ -1,8 +1,10 @@
 use crate::cli::{
     AgentSelection, BrandColors, FieldSet, PaneTitles, SidebarField, SidebarLayout, SidebarRowGap,
+    ThemeMode,
 };
 use crate::identity::{self, PLUGIN_ID};
 use crate::model::Harness;
+use crate::theme::{self, ThemePalette};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -84,42 +86,50 @@ const REFRESH_KEY: &str = "prefix+shift+r";
 const SETTINGS_KEY: &str = "prefix+shift+q";
 const TOGGLE_ORDER_KEY: &str = "prefix+shift+o";
 const CONFIG_PRESENCE_FILE: &str = "herdr-config.original.present";
-// Brand answers "who"; status answers "how much is left". All other text
-// inherits Herdr's active theme. Selected state may change background only —
-// never the provider hue. Herdr 0.8.0 rejects selection_bg / active_row_bg
-// (0.8.2 added them); intended selected fill is #42474f when those keys exist.
-const QUOTA_SAFE_COLOR: &str = "#82d978";
-const QUOTA_WARNING_COLOR: &str = "#e4b957";
-/// Idle logo ink. Working / done / blocked colours match Herdr's default dark
-/// `state_icon` palette so the brand glyph replaces the ring without a second
-/// circle on the row.
-const IDLE_ICON_COLOR: &str = "#e9e9f0";
+// Brand answers "who"; status answers "how much is left". Idle text, brand
+// status colours, and quota severity all come from `crate::theme` so they
+// follow Herdr's active light/dark palette. Selected state may change
+// background only — never the provider hue. Herdr 0.8.0 rejects
+// selection_bg / active_row_bg (0.8.2 added them); intended selected fill is
+// #42474f when those keys exist.
+//
+// Tests that inspect generated rows use the default dark palette. Keep these
+// aliases in one place so a palette change updates the expectations too.
+#[cfg(test)]
+const QUOTA_SAFE_COLOR: &str = "#a6e3a1";
+#[cfg(test)]
+const QUOTA_WARNING_COLOR: &str = "#f9e2af";
+#[cfg(test)]
+const QUOTA_DANGER_COLOR: &str = "#f38ba8";
+#[cfg(test)]
+const IDLE_ICON_COLOR: &str = "#cdd6f4";
+#[cfg(test)]
 const WORKING_ICON_COLOR: &str = "#f9e2af";
+#[cfg(test)]
 const DONE_ICON_COLOR: &str = "#94e2d5";
+#[cfg(test)]
 const BLOCKED_ICON_COLOR: &str = "#f38ba8";
-const QUOTA_DANGER_COLOR: &str = "#f16f7e";
-// The same three bands, muted, for the meter rows only. `packed` and
-// `stacked` tint one short token, where a full-strength hue is legible; a
-// `gauges` row repeats it across a dozen bar glyphs, where it reads as alarm
-// rather than as a reading. Both sets exist because Herdr fixes `fg` per token
-// name, so a layout cannot restyle a token it shares with another layout.
-const GAUGE_QUOTA_SAFE_COLOR: &str = "#98b17d";
-const GAUGE_QUOTA_WARNING_COLOR: &str = "#dec27f";
-const GAUGE_QUOTA_DANGER_COLOR: &str = "#df919b";
-const SEVERITY_PALETTE: [&str; 3] = [QUOTA_SAFE_COLOR, QUOTA_WARNING_COLOR, QUOTA_DANGER_COLOR];
-const GAUGE_SEVERITY_PALETTE: [&str; 3] = [
-    GAUGE_QUOTA_SAFE_COLOR,
-    GAUGE_QUOTA_WARNING_COLOR,
-    GAUGE_QUOTA_DANGER_COLOR,
-];
+#[cfg(test)]
+const GAUGE_QUOTA_SAFE_COLOR: &str = "#a9d1a6";
+#[cfg(test)]
+const GAUGE_QUOTA_WARNING_COLOR: &str = "#dfd0af";
+#[cfg(test)]
+const GAUGE_QUOTA_DANGER_COLOR: &str = "#db97aa";
 
-/// The normal/warning/danger hues a layout paints its quota rows with.
+#[cfg(test)]
 fn severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
     match layout {
-        SidebarLayout::Gauges => GAUGE_SEVERITY_PALETTE,
-        SidebarLayout::Packed | SidebarLayout::Stacked => SEVERITY_PALETTE,
+        SidebarLayout::Gauges => [
+            GAUGE_QUOTA_SAFE_COLOR,
+            GAUGE_QUOTA_WARNING_COLOR,
+            GAUGE_QUOTA_DANGER_COLOR,
+        ],
+        SidebarLayout::Packed | SidebarLayout::Stacked => {
+            [QUOTA_SAFE_COLOR, QUOTA_WARNING_COLOR, QUOTA_DANGER_COLOR]
+        }
     }
 }
+
 /// Provider row keys only. Provider and model text inherit the sidebar theme;
 /// status colour lives on the vendor icon's three mutually exclusive tokens.
 const PROVIDER_STYLES: [(Harness, &str); 12] = [
@@ -155,9 +165,11 @@ pub fn check(
     fields: FieldSet,
     brand: BrandColors,
     pane_titles: PaneTitles,
+    theme_mode: ThemeMode,
 ) -> Result<()> {
     let path = config_path()?;
     let original = fs::read_to_string(&path).unwrap_or_default();
+    let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
     let (updated, skipped) = rewrite_quota_sidebar_with_titles(
         &original,
         agents,
@@ -166,6 +178,7 @@ pub fn check(
         fields,
         brand,
         pane_titles,
+        &palette,
     )?;
     if updated == original {
         println!(
@@ -193,10 +206,12 @@ pub fn apply(
     fields: FieldSet,
     brand: BrandColors,
     pane_titles: PaneTitles,
+    theme_mode: ThemeMode,
 ) -> Result<()> {
     let path = config_path()?;
     let existed = path.exists();
     let original = fs::read_to_string(&path).unwrap_or_default();
+    let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
     let (updated, skipped) = rewrite_quota_sidebar_with_titles(
         &original,
         agents,
@@ -205,6 +220,7 @@ pub fn apply(
         fields,
         brand,
         pane_titles,
+        &palette,
     )?;
     if let Some(line) = skipped_provider_notice(&skipped) {
         println!("{line}");
@@ -231,6 +247,7 @@ pub fn uninstall(
     full: bool,
     fields: FieldSet,
     brand: BrandColors,
+    theme_mode: ThemeMode,
 ) -> Result<()> {
     let path = config_path()?;
     if !full {
@@ -249,8 +266,14 @@ pub fn uninstall(
     }
     if path.exists() {
         let original = fs::read_to_string(&path).context("read Herdr config")?;
-        let updated =
-            reversible_backup(&original, fields, brand)?.unwrap_or(remove_quota_row(&original)?);
+        let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
+        let palettes = [
+            palette,
+            ThemePalette::catppuccin(),
+            ThemePalette::catppuccin_latte(),
+        ];
+        let updated = reversible_backup(&original, fields, brand, &palettes)?
+            .unwrap_or(remove_quota_row(&original)?);
         let originally_absent = backup_presence_path()?
             .and_then(|path| fs::read_to_string(path).ok())
             .is_some_and(|value| value.trim() == "absent");
@@ -405,6 +428,7 @@ fn reversible_backup(
     current: &str,
     fields: FieldSet,
     brand: BrandColors,
+    palettes: &[ThemePalette],
 ) -> Result<Option<String>> {
     let Some(path) = backup_path()? else {
         return Ok(None);
@@ -413,7 +437,7 @@ fn reversible_backup(
         return Ok(None);
     }
     let original = fs::read_to_string(&path).context("read Herdr config backup")?;
-    if matches_installed_quota_rows(&original, current, fields, brand)? {
+    if matches_installed_quota_rows(&original, current, fields, brand, palettes)? {
         return Ok(Some(original));
     }
     Ok(None)
@@ -431,26 +455,30 @@ fn matches_installed_quota_rows(
     current: &str,
     fields: FieldSet,
     brand: BrandColors,
+    palettes: &[ThemePalette],
 ) -> Result<bool> {
     let mut variants = vec![(fields, brand)];
     if !variants.contains(&(FieldSet::all(), BrandColors::On)) {
         variants.push((FieldSet::all(), BrandColors::On));
     }
     for (fields, brand) in variants {
-        for layout in SidebarLayout::CHOICES {
-            for gap in [SidebarRowGap::FLUSH, SidebarRowGap::SEPARATED] {
-                for pane_titles in [PaneTitles::Off, PaneTitles::On] {
-                    if add_quota_row_with_titles(
-                        original,
-                        &AgentSelection::SUPPORTED,
-                        layout,
-                        gap,
-                        fields,
-                        brand,
-                        pane_titles,
-                    )? == current
-                    {
-                        return Ok(true);
+        for palette in palettes {
+            for layout in SidebarLayout::CHOICES {
+                for gap in [SidebarRowGap::FLUSH, SidebarRowGap::SEPARATED] {
+                    for pane_titles in [PaneTitles::Off, PaneTitles::On] {
+                        if add_quota_row_with_titles_and_palette(
+                            original,
+                            &AgentSelection::SUPPORTED,
+                            layout,
+                            gap,
+                            fields,
+                            brand,
+                            pane_titles,
+                            palette,
+                        )? == current
+                        {
+                            return Ok(true);
+                        }
                     }
                 }
             }
@@ -490,11 +518,43 @@ pub fn add_quota_row_with(
     fields: FieldSet,
     brand: BrandColors,
 ) -> Result<String> {
-    Ok(rewrite_quota_sidebar(input, agents, layout, row_gap, fields, brand)?.0)
+    add_quota_row_with_palette(
+        input,
+        agents,
+        layout,
+        row_gap,
+        fields,
+        brand,
+        PaneTitles::Off,
+        &ThemePalette::catppuccin(),
+    )
 }
 
-// Keep the historical helper for tests and callers inspecting old layouts.
-// Production configure resolves the new preference, which defaults to on.
+#[allow(clippy::too_many_arguments)]
+pub fn add_quota_row_with_palette(
+    input: &str,
+    agents: &[Harness],
+    layout: SidebarLayout,
+    row_gap: SidebarRowGap,
+    fields: FieldSet,
+    brand: BrandColors,
+    pane_titles: PaneTitles,
+    palette: &ThemePalette,
+) -> Result<String> {
+    Ok(rewrite_quota_sidebar_with_titles(
+        input,
+        agents,
+        layout,
+        row_gap,
+        fields,
+        brand,
+        pane_titles,
+        palette,
+    )?
+    .0)
+}
+
+#[cfg(test)]
 fn rewrite_quota_sidebar(
     input: &str,
     agents: &[Harness],
@@ -511,6 +571,7 @@ fn rewrite_quota_sidebar(
         fields,
         brand,
         PaneTitles::Off,
+        &ThemePalette::catppuccin(),
     )
 }
 
@@ -523,6 +584,29 @@ pub fn add_quota_row_with_titles(
     brand: BrandColors,
     pane_titles: PaneTitles,
 ) -> Result<String> {
+    add_quota_row_with_titles_and_palette(
+        input,
+        agents,
+        layout,
+        row_gap,
+        fields,
+        brand,
+        pane_titles,
+        &ThemePalette::catppuccin(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_quota_row_with_titles_and_palette(
+    input: &str,
+    agents: &[Harness],
+    layout: SidebarLayout,
+    row_gap: SidebarRowGap,
+    fields: FieldSet,
+    brand: BrandColors,
+    pane_titles: PaneTitles,
+    palette: &ThemePalette,
+) -> Result<String> {
     Ok(rewrite_quota_sidebar_with_titles(
         input,
         agents,
@@ -531,10 +615,12 @@ pub fn add_quota_row_with_titles(
         fields,
         brand,
         pane_titles,
+        palette,
     )?
     .0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rewrite_quota_sidebar_with_titles(
     input: &str,
     agents: &[Harness],
@@ -543,6 +629,7 @@ fn rewrite_quota_sidebar_with_titles(
     fields: FieldSet,
     _brand: BrandColors,
     pane_titles: PaneTitles,
+    palette: &ThemePalette,
 ) -> Result<(String, Vec<&'static str>)> {
     let mut document = if input.trim().is_empty() {
         DocumentMut::new()
@@ -602,8 +689,9 @@ fn rewrite_quota_sidebar_with_titles(
         } else {
             RowRewrite::Preserve
         },
+        palette,
     )?;
-    // Identity is ink-white for every harness; status colour is the exclusive
+    // Identity text follows the active theme; status colour is the exclusive
     // `$quota_icon` / `_working` / `_done` twin — never a second `state_icon`.
     let skipped = if !rows_safe {
         add_provider_rows(table, &managed_rows, agents)?
@@ -635,6 +723,7 @@ fn build_managed_rows(
     pane_titles: PaneTitles,
     original_is_managed: bool,
     rewrite: RowRewrite,
+    palette: &ThemePalette,
 ) -> Result<Array> {
     let preserved = match rewrite {
         // Group headers replace the per-pane workspace/tab identity row:
@@ -683,7 +772,7 @@ fn build_managed_rows(
     } else {
         PaneTitles::Off
     };
-    append_quota_rows(&mut updated_rows, layout, topic_line);
+    append_quota_rows(&mut updated_rows, layout, topic_line, palette);
     // Keep `$quota_group` first so Space aggregation stays the head row;
     // user-owned extras (pane/git/other plugins) sit directly under it.
     if user_count > 0 {
@@ -860,6 +949,7 @@ pub fn remove_quota_row_for(input: &str, agents: &[Harness], full: bool) -> Resu
             input,
             super::resolved_fields(None, None),
             super::resolved_brand_colors(None, None),
+            &[ThemePalette::catppuccin(), ThemePalette::catppuccin_latte()],
         )?
     {
         return Ok(String::new());
@@ -1147,7 +1237,12 @@ fn is_standalone_agent_row(row: &Array) -> bool {
     row.len() == 1 && row.get(0).and_then(Value::as_str) == Some("agent")
 }
 
-fn append_quota_rows(rows: &mut Array, layout: SidebarLayout, pane_titles: PaneTitles) {
+fn append_quota_rows(
+    rows: &mut Array,
+    layout: SidebarLayout,
+    pane_titles: PaneTitles,
+    palette: &ThemePalette,
+) {
     // Group header first: empty on non-head panes so Herdr collapses the row.
     // The stock machine/workspace identity stays omitted — the group header is
     // the Space name, and repeating it on every pane is what made the list
@@ -1160,37 +1255,41 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout, pane_titles: PaneT
     )));
     match layout {
         SidebarLayout::Gauges => {
-            append_identity_row(rows);
+            append_identity_row(rows, palette);
             // Filled only on a nested vendor head so a single Cursor/Grok pane
             // keeps topic and context above its own 5h/7d/30d.
-            append_share_window_rows(rows, layout);
+            append_share_window_rows(rows, layout, palette);
             rows.push(Value::Array(styled_row(
                 "$quota_model",
-                Some(IDLE_ICON_COLOR),
+                Some(palette.idle.as_str()),
                 Some(false),
                 Some(false),
             )));
             append_topic_row(rows, pane_titles);
-            append_cache_error_and_context_rows(rows, layout);
-            append_window_rows(rows, layout);
+            append_cache_error_and_context_rows(rows, layout, palette);
+            append_window_rows(rows, layout, palette);
             append_pack_gap_row(rows);
         }
         SidebarLayout::Packed => {
-            append_identity_row(rows);
+            append_identity_row(rows, palette);
             append_topic_row(rows, pane_titles);
-            append_packed_quota_rows(rows);
+            append_packed_quota_rows(rows, palette);
             append_pack_gap_row(rows);
         }
         SidebarLayout::Stacked => {
-            rows.push(Value::Array(identity_cells("$quota_provider", Some(true))));
+            rows.push(Value::Array(identity_cells(
+                "$quota_provider",
+                Some(true),
+                palette,
+            )));
             rows.push(Value::Array(styled_row(
                 "$quota_model",
-                Some(IDLE_ICON_COLOR),
+                Some(palette.idle.as_str()),
                 Some(false),
                 Some(false),
             )));
             append_topic_row(rows, pane_titles);
-            append_stacked_quota_rows(rows, layout);
+            append_stacked_quota_rows(rows, layout, palette);
             append_pack_gap_row(rows);
         }
     }
@@ -1225,15 +1324,15 @@ fn append_pack_gap_row(rows: &mut Array) {
     )));
 }
 
-fn append_identity_row(rows: &mut Array) {
-    let mut row = identity_cells("$quota_provider_model", Some(true));
+fn append_identity_row(rows: &mut Array, palette: &ThemePalette) {
+    let mut row = identity_cells("$quota_provider_model", Some(true), palette);
     // Same row as the icon. Heads fill the bold cell. Other panes fill this
     // unbold cell and leave the bold one empty, so Herdr does not promote
     // the row into a Space. An empty cell is dropped, which keeps one
     // ` · ` between the icon and the name.
     row.push(styled_token(
         "$quota_member",
-        Some(IDLE_ICON_COLOR),
+        Some(palette.idle.as_str()),
         Some(false),
         Some(false),
     ));
@@ -1246,33 +1345,36 @@ fn append_identity_row(rows: &mut Array) {
 /// identity token. A later `$quota_icon_done` twin on a Space-head row
 /// hang-indents one cell to the right. No `state_icon`: two circles on one
 /// row is what this replaces.
-fn identity_cells(name: &str, name_bold: Option<bool>) -> Array {
+fn identity_cells(name: &str, name_bold: Option<bool>, palette: &ThemePalette) -> Array {
     let mut row = Array::new();
-    row.push(identity_icon_token());
+    row.push(identity_icon_token(palette));
     row.push(styled_token(
         name,
-        Some(IDLE_ICON_COLOR),
+        Some(palette.idle.as_str()),
         name_bold,
         Some(false),
     ));
     row
 }
 
-fn identity_icon_token() -> Value {
+fn identity_icon_token(palette: &ThemePalette) -> Value {
     let mut value = InlineTable::new();
     value.insert("token", Value::from("$quota_icon"));
-    value.insert("fg", Value::from(IDLE_ICON_COLOR));
+    value.insert("fg", Value::from(palette.idle.as_str()));
     value.insert("bold", Value::from(false));
     value.insert("dim", Value::from(false));
     let mut rules = Array::new();
-    rules.push(contains_fg_rule(crate::icons::DONE_TAG, DONE_ICON_COLOR));
+    rules.push(contains_fg_rule(
+        crate::icons::DONE_TAG,
+        palette.done.as_str(),
+    ));
     rules.push(contains_fg_rule(
         crate::icons::WORKING_TAG,
-        WORKING_ICON_COLOR,
+        palette.working.as_str(),
     ));
     rules.push(contains_fg_rule(
         crate::icons::BLOCKED_TAG,
-        BLOCKED_ICON_COLOR,
+        palette.blocked.as_str(),
     ));
     value.insert("rules", Value::Array(rules));
     Value::InlineTable(value)
@@ -1285,9 +1387,9 @@ fn contains_fg_rule(contains: &str, fg: &str) -> Value {
     Value::InlineTable(rule)
 }
 
-fn append_packed_quota_rows(rows: &mut Array) {
-    let palette = severity_palette(SidebarLayout::Packed);
-    append_cache_row(rows);
+fn append_packed_quota_rows(rows: &mut Array, theme_palette: &ThemePalette) {
+    let palette = theme_palette.severity(SidebarLayout::Packed);
+    append_cache_row(rows, theme_palette);
 
     let mut context_row = styled_row("$quota_context", None, Some(false), Some(false));
     append_window_style_tokens(&mut context_row, "quota_week_inline", palette);
@@ -1296,8 +1398,8 @@ fn append_packed_quota_rows(rows: &mut Array) {
     append_window_row(rows, palette);
 }
 
-fn append_share_window_rows(rows: &mut Array, layout: SidebarLayout) {
-    let palette = severity_palette(layout);
+fn append_share_window_rows(rows: &mut Array, layout: SidebarLayout, theme_palette: &ThemePalette) {
+    let palette = theme_palette.severity(layout);
     let mut five_hour = Array::new();
     append_window_style_tokens(&mut five_hour, "quota_share_5h", palette);
     rows.push(Value::Array(five_hour));
@@ -1310,8 +1412,8 @@ fn append_share_window_rows(rows: &mut Array, layout: SidebarLayout) {
     rows.push(Value::Array(month));
 }
 
-fn append_window_rows(rows: &mut Array, layout: SidebarLayout) {
-    let palette = severity_palette(layout);
+fn append_window_rows(rows: &mut Array, layout: SidebarLayout, theme_palette: &ThemePalette) {
+    let palette = theme_palette.severity(layout);
     let mut five_hour = Array::new();
     append_window_style_tokens(&mut five_hour, "quota_5h", palette);
     rows.push(Value::Array(five_hour));
@@ -1327,8 +1429,12 @@ fn append_window_rows(rows: &mut Array, layout: SidebarLayout) {
     rows.push(Value::Array(month));
 }
 
-fn append_cache_error_and_context_rows(rows: &mut Array, layout: SidebarLayout) {
-    let palette = severity_palette(layout);
+fn append_cache_error_and_context_rows(
+    rows: &mut Array,
+    layout: SidebarLayout,
+    theme_palette: &ThemePalette,
+) {
+    let palette = theme_palette.severity(layout);
     match layout {
         // Herdr colours each token, not each row. Folding `no cached` into
         // `$quota_cache` would share the line and paint the warning grey.
@@ -1337,7 +1443,7 @@ fn append_cache_error_and_context_rows(rows: &mut Array, layout: SidebarLayout) 
                 styled_token("$quota_cache", None, Some(false), Some(false)),
                 styled_token(
                     "$quota_cache_state",
-                    Some(QUOTA_WARNING_COLOR),
+                    Some(theme_palette.warning.as_str()),
                     Some(false),
                     Some(false),
                 ),
@@ -1364,7 +1470,7 @@ fn append_cache_error_and_context_rows(rows: &mut Array, layout: SidebarLayout) 
             )));
             rows.push(Value::Array(styled_row(
                 "$quota_cache_state",
-                Some(QUOTA_WARNING_COLOR),
+                Some(theme_palette.warning.as_str()),
                 Some(false),
                 Some(false),
             )));
@@ -1372,7 +1478,7 @@ fn append_cache_error_and_context_rows(rows: &mut Array, layout: SidebarLayout) 
     }
     rows.push(Value::Array(styled_row(
         "$quota_error",
-        Some(QUOTA_WARNING_COLOR),
+        Some(theme_palette.warning.as_str()),
         Some(false),
         Some(false),
     )));
@@ -1391,9 +1497,9 @@ fn append_cache_error_and_context_rows(rows: &mut Array, layout: SidebarLayout) 
     }
 }
 
-fn append_stacked_quota_rows(rows: &mut Array, layout: SidebarLayout) {
-    append_cache_error_and_context_rows(rows, layout);
-    append_window_rows(rows, layout);
+fn append_stacked_quota_rows(rows: &mut Array, layout: SidebarLayout, palette: &ThemePalette) {
+    append_cache_error_and_context_rows(rows, layout, palette);
+    append_window_rows(rows, layout, palette);
 }
 
 /// Drop the tokens of every field the user turned off, then drop the rows
@@ -1487,26 +1593,26 @@ fn field_for_token(token: &str) -> Option<SidebarField> {
     }
 }
 
-fn append_cache_row(rows: &mut Array) {
+fn append_cache_row(rows: &mut Array, palette: &ThemePalette) {
     rows.push(Value::Array(Array::from_iter([
         styled_token("$quota_cache", None, Some(false), Some(false)),
         styled_token("$quota_cache_ttl", None, Some(false), Some(false)),
         styled_token(
             "$quota_cache_state",
-            Some(QUOTA_WARNING_COLOR),
+            Some(palette.warning.as_str()),
             Some(false),
             Some(false),
         ),
         styled_token(
             "$quota_error",
-            Some(QUOTA_WARNING_COLOR),
+            Some(palette.warning.as_str()),
             Some(false),
             Some(false),
         ),
     ])));
 }
 
-fn append_window_style_tokens(row: &mut Array, base: &str, palette: [&'static str; 3]) {
+fn append_window_style_tokens(row: &mut Array, base: &str, palette: [&str; 3]) {
     // One compact token per window (`5h 0% 1h18m`). Herdr joins sibling
     // tokens with ` · `, so splitting label/percent/eta cannot stay compact.
     // Exactly the bands `Severity::for_window` can produce. There is no
@@ -1530,7 +1636,7 @@ fn append_window_style_tokens(row: &mut Array, base: &str, palette: [&'static st
 /// The context row's own severity family. Context severity is read from the
 /// context *left*, and `Severity::for_context_remaining` always lands on one
 /// of these three, so there is no `unknown` variant to fill.
-fn append_context_style_tokens(row: &mut Array, palette: [&'static str; 3]) {
+fn append_context_style_tokens(row: &mut Array, palette: [&str; 3]) {
     for (suffix, color) in ["normal", "warning", "danger"].into_iter().zip(palette) {
         row.push(styled_token(
             &format!("$quota_context_{suffix}"),
@@ -1541,7 +1647,7 @@ fn append_context_style_tokens(row: &mut Array, palette: [&'static str; 3]) {
     }
 }
 
-fn append_window_row(rows: &mut Array, palette: [&'static str; 3]) {
+fn append_window_row(rows: &mut Array, palette: [&str; 3]) {
     let mut row = Array::new();
     for base in ["quota_5h", "quota_week", "quota_month"] {
         append_window_style_tokens(&mut row, base, palette);
@@ -2462,22 +2568,22 @@ rows = [["state_icon", "agent"]]
             (
                 "",
                 [
-                    "c1884f4aa06a586bcb984577c124d93554b55a85813f61a00f3fa0a72ade2898",
-                    "6ee4dda7e2a613580ff4b7f7582f8b554d8bae9f2fd64fce9d94e015d6fb4172",
+                    "4737c898aa704fe4cc5cb2c7a46ddec43c7113a42308709d8a49242f44aa8cd7",
+                    "198dd44a80ec784662e2d14e848211292da65631ab1c0f896f0a20101e5c3a8d",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]\n",
                 [
-                    "1e33b5299d85253ba6f7d574ed06db9332643d2e7b272695573c8d8774c2b37c",
-                    "9310e109c5b0612f29bfe43cfb227a0209eea60481ef3d0d0a7b6aaf267f8da7",
+                    "3f1cfaa42ad0e0bf15413aedf7fad3c5bde2a29bbcd2c0463d7382a21742191c",
+                    "f31dcaa8784402ba640483edb6f6144b093a1b8a66fb404a41b4dfbe18eb5752",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", { token = \"tab\", bold = true }, \"$quota_provider_model\"], [\"$quota_topic\"]] # herdr-agent-quota-row\n",
                 [
-                    "1e33b5299d85253ba6f7d574ed06db9332643d2e7b272695573c8d8774c2b37c",
-                    "9310e109c5b0612f29bfe43cfb227a0209eea60481ef3d0d0a7b6aaf267f8da7",
+                    "3f1cfaa42ad0e0bf15413aedf7fad3c5bde2a29bbcd2c0463d7382a21742191c",
+                    "f31dcaa8784402ba640483edb6f6144b093a1b8a66fb404a41b4dfbe18eb5752",
                 ],
             ),
         ] {
@@ -2582,12 +2688,23 @@ rows = [["state_icon", "agent"]]
         ] {
             assert!(gauged.contains(hex), "gauges lacks {hex}:\n{gauged}");
         }
-        for hex in [QUOTA_SAFE_COLOR, QUOTA_DANGER_COLOR] {
-            assert!(
-                !gauged.contains(hex),
-                "gauges still writes {hex}:\n{gauged}"
+        let document = gauged.parse::<DocumentMut>().unwrap();
+        for (token, expected) in [
+            ("$quota_5h_normal", GAUGE_QUOTA_SAFE_COLOR),
+            ("$quota_5h_warning", GAUGE_QUOTA_WARNING_COLOR),
+            ("$quota_5h_danger", GAUGE_QUOTA_DANGER_COLOR),
+            ("$quota_context_normal", GAUGE_QUOTA_SAFE_COLOR),
+        ] {
+            assert_eq!(
+                token_fg(&document, token).as_deref(),
+                Some(expected),
+                "gauges wrote the wrong fg on {token}"
             );
         }
+        assert_ne!(
+            token_fg(&document, "$quota_5h_normal").as_deref(),
+            Some(QUOTA_SAFE_COLOR)
+        );
         for layout in [SidebarLayout::Packed, SidebarLayout::Stacked] {
             let plain = add_quota_row_for("", &AgentSelection::SUPPORTED, layout).unwrap();
             for hex in [
@@ -2843,7 +2960,7 @@ rows = [["state_icon", "agent"]]
                 .iter()
                 .any(|item| configured_token_name(item) == Some("$quota_error"))
         }));
-        assert!(updated.contains("fg = \"#e4b957\""));
+        assert!(updated.contains(QUOTA_WARNING_COLOR));
     }
 
     #[test]
@@ -3643,7 +3760,14 @@ mod field_tests {
         let fields = FieldSet::all().toggled(SidebarField::Context);
         let installed = applied(fields, BrandColors::Off);
         assert!(
-            matches_installed_quota_rows("", &installed, fields, BrandColors::Off).unwrap(),
+            matches_installed_quota_rows(
+                "",
+                &installed,
+                fields,
+                BrandColors::Off,
+                &[ThemePalette::catppuccin()],
+            )
+            .unwrap(),
             "{installed}"
         );
     }

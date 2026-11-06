@@ -27,6 +27,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Theme-aware sidebar colors.** Brand status and quota severity hexes now
+  come from Herdr's built-in theme (including `theme.auto_switch` and the
+  `text`/`green`/`yellow`/`red`/`teal` overrides under `theme.custom`) instead
+  of a dark-only palette. `--theme auto|dark|light` and a Settings row choose
+  whether to follow Herdr or force an appearance.
 - Optional **Hack Herdr Nerd Font** for iTerm2: a release bundle combines
   Hack Nerd Font with all 29 bundled Herdr marks without changing plugin or
   terminal settings. The repository keeps the reproducible builder and

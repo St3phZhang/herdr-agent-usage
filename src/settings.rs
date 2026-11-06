@@ -14,7 +14,7 @@
 use crate::cache::CacheStore;
 use crate::cli::{
     AgentOrder, AgentSelection, FieldSet, LowQuotaAlert, PaneTitles, PercentStyle, SidebarField,
-    SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace,
+    SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace, ThemeMode,
 };
 use crate::model::Harness;
 use crate::prefs;
@@ -44,6 +44,7 @@ enum Choice {
     Pacing,
     StatuslinePace,
     Layout,
+    Theme,
     PaneTitles,
     RowGap,
     Interval,
@@ -58,6 +59,7 @@ impl Choice {
             Self::Pacing => "Sidebar pacing",
             Self::StatuslinePace => "StatusLine pace",
             Self::Layout => "Sidebar layout",
+            Self::Theme => "Color theme",
             Self::PaneTitles => "Pane titles",
             Self::RowGap => "Row gap",
             Self::Interval => "Watch interval",
@@ -74,6 +76,7 @@ fn rows() -> Vec<Row> {
         Row::Choice(Choice::Pacing),
         Row::Choice(Choice::StatuslinePace),
         Row::Choice(Choice::Layout),
+        Row::Choice(Choice::Theme),
         Row::Choice(Choice::PaneTitles),
         Row::Choice(Choice::RowGap),
         Row::Choice(Choice::Interval),
@@ -94,6 +97,7 @@ pub struct Settings {
     pacing: SidebarPacing,
     statusline_pace: StatuslinePace,
     layout: SidebarLayout,
+    theme: ThemeMode,
     pane_titles: PaneTitles,
     gap: SidebarRowGap,
     interval_seconds: u64,
@@ -119,6 +123,7 @@ impl Settings {
             pacing: crate::configure::resolved_sidebar_pacing(None, cache),
             statusline_pace: crate::configure::resolved_statusline_pace(None, cache),
             layout: crate::configure::resolved_sidebar_layout(None, cache),
+            theme: crate::configure::resolved_theme(None),
             pane_titles: crate::configure::resolved_pane_titles(None, cache),
             gap: crate::configure::resolved_row_gap(None, cache),
             interval_seconds: cache
@@ -137,6 +142,7 @@ impl Settings {
             Choice::Pacing => self.pacing.as_str().to_string(),
             Choice::StatuslinePace => self.statusline_pace.as_str().to_string(),
             Choice::Layout => self.layout.as_str().to_string(),
+            Choice::Theme => self.theme.as_str().to_string(),
             Choice::PaneTitles => self.pane_titles.as_str().to_string(),
             Choice::RowGap => self.gap.to_string(),
             Choice::Interval => format_interval(self.interval_seconds),
@@ -173,6 +179,11 @@ impl Settings {
                     true => "a meter beside each quota number",
                     false => "sidebar too narrow: renders as stacked",
                 },
+            },
+            Choice::Theme => match self.theme {
+                ThemeMode::Auto => "follow Herdr's light/dark theme",
+                ThemeMode::Dark => "force the dark palette",
+                ThemeMode::Light => "force the light palette",
             },
             Choice::PaneTitles => match self.pane_titles {
                 PaneTitles::On => "scrolling title replaces topic",
@@ -247,6 +258,15 @@ impl Settings {
                 let next = (current as i8 + step).rem_euclid(count);
                 self.layout = SidebarLayout::CHOICES[next as usize];
             }
+            Row::Choice(Choice::Theme) => {
+                let current = ThemeMode::CHOICES
+                    .iter()
+                    .position(|value| *value == self.theme)
+                    .unwrap_or(0);
+                let count = ThemeMode::CHOICES.len() as i8;
+                let next = (current as i8 + step).rem_euclid(count);
+                self.theme = ThemeMode::CHOICES[next as usize];
+            }
             Row::Choice(Choice::PaneTitles) => {
                 self.pane_titles = match self.pane_titles {
                     PaneTitles::On => PaneTitles::Off,
@@ -317,6 +337,8 @@ impl Settings {
             self.statusline_pace.as_str().to_string(),
             "--sidebar-layout".to_string(),
             self.layout.as_str().to_string(),
+            "--theme".to_string(),
+            self.theme.as_str().to_string(),
             "--pane-titles".to_string(),
             self.pane_titles.as_str().to_string(),
             "--row-gap".to_string(),
@@ -655,6 +677,7 @@ mod tests {
             pacing: SidebarPacing::Off,
             statusline_pace: StatuslinePace::Off,
             layout: SidebarLayout::Gauges,
+            theme: ThemeMode::Auto,
             pane_titles: PaneTitles::On,
             gap: SidebarRowGap::SEPARATED,
             interval_seconds: 60,
@@ -726,6 +749,21 @@ mod tests {
         for line in frame.trim_end_matches("\r\n").split("\r\n") {
             assert!(line.chars().count() <= 70, "too wide: {line}");
         }
+    }
+
+    #[test]
+    fn the_theme_cycles_through_all_three_choices_in_both_directions() {
+        let mut draft = settings();
+        draft.cycle(Row::Choice(Choice::Theme), 1);
+        assert_eq!(draft.theme, ThemeMode::Dark);
+        draft.cycle(Row::Choice(Choice::Theme), 1);
+        assert_eq!(draft.theme, ThemeMode::Light);
+        draft.cycle(Row::Choice(Choice::Theme), -1);
+        assert_eq!(draft.theme, ThemeMode::Dark);
+        for _ in 0..ThemeMode::CHOICES.len() {
+            draft.cycle(Row::Choice(Choice::Theme), 1);
+        }
+        assert_eq!(draft.theme, ThemeMode::Dark);
     }
 
     #[test]
@@ -819,6 +857,8 @@ mod tests {
                 "off",
                 "--sidebar-layout",
                 "gauges",
+                "--theme",
+                "auto",
                 "--pane-titles",
                 "on",
                 "--row-gap",
