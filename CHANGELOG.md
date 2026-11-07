@@ -30,7 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Quota bar mode.** `--quota-bar on` restores Herdr's native Agents panel for
   session management and adds one `ui.tab_bar_right` command entry. The entry
   runs the plugin's `quota-bar` subcommand, which prints a compact one-line
-  summary of only the harnesses with live panes (`OC 5h88% 7d95% · CL 5h61%`).
+  summary of only the harnesses with live panes (`OC 5h88% · CX 7d100%`). Each
+  provider shows one window: OpenCode Go's official allowance is 20% of the
+  monthly limit for 5h and 50% for 7d, so the bar normalizes remaining
+  percentages to monthly-allowance units and picks the tighter window.
   Switching the mode back off removes the entry and restores the quota sidebar
   rows.
 - **Theme-aware sidebar colors.** Brand status and quota severity hexes now

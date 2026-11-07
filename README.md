@@ -212,10 +212,15 @@ Enable sidebar pacing, or opt out of the separate Claude statusLine pace, during
 Quota-bar mode restores Herdr's native Agents sidebar (session management) and
 adds one `ui.tab_bar_right` command entry. The entry calls the plugin's
 `quota-bar` subcommand every five seconds and prints only harnesses that have a
-live pane, for example `OC 5h88% 7d95% · CL 5h61%`. The tab bar strips ANSI
-styles, so the summary is plain text; use the quota popup or dashboard when you
-need colored meters and every window. `hide_tab_bar_when_single_tab = true`
-also hides this quota bar, so leave it off (or use `tab_bar_position = "bottom"`).
+live pane, for example `OC 5h88% · CX 7d100%`. Each provider shows exactly one
+window. OpenCode Go defines the 5-hour allowance as 20% of the monthly limit,
+the weekly allowance as 50%, and the monthly limit as 100%; the bar compares
+remaining percentages in those monthly-allowance units and shows the window
+with the least headroom. A plentiful 5h therefore wins over a plentiful 7d,
+while a low 7d wins over a high 5h. The tab bar strips ANSI styles, so the
+summary is plain text; use the quota popup or dashboard when you need colored
+meters and every window. `hide_tab_bar_when_single_tab = true` also hides this
+quota bar, so leave it off (or use `tab_bar_position = "bottom"`).
 
 Plugin-owned brand/status and quota-severity colors are resolved from Herdr's
 built-in theme palette. `auto` reads `[theme]` in Herdr's `config.toml`,

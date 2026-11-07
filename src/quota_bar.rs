@@ -86,11 +86,20 @@ pub fn format_line(panes: &[AgentPane]) -> String {
         .join(" · ")
 }
 
+/// OpenCode Go publishes the usage allowance as 20% of the monthly limit for
+/// the 5-hour window and 50% for the weekly window. Comparing raw remaining
+/// percentages would treat 1% of the weekly allowance as equal to 1% of the
+/// much smaller 5-hour allowance. Normalize to monthly-allowance points and
+/// show the window with the least absolute headroom left.
+const FIVE_HOUR_ALLOWANCE: f64 = 0.20;
+const WEEK_ALLOWANCE: f64 = 0.50;
+const MONTH_ALLOWANCE: f64 = 1.00;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Windows {
-    five_hour: Option<String>,
-    week: Option<String>,
-    month: Option<String>,
+    five_hour: Option<u8>,
+    week: Option<u8>,
+    month: Option<u8>,
 }
 
 impl Windows {
@@ -127,21 +136,25 @@ impl Group {
                 label.push_str(&suffix);
             }
         }
-        let mut parts = vec![label];
-        if let Some(percent) = self.windows.five_hour {
-            parts.push(format!("5h{percent}%"));
-        }
-        if let Some(percent) = self.windows.week {
-            parts.push(format!("7d{percent}%"));
-        }
-        // A harness with no 5h/7d reading but a monthly one still gets a
-        // useful number instead of disappearing from the bar.
-        if parts.len() == 1 {
-            if let Some(percent) = self.windows.month {
-                parts.push(format!("30d{percent}%"));
+        let mut best: Option<(&'static str, u8, f64)> = None;
+        for (window, percent, allowance) in [
+            ("5h", self.windows.five_hour, FIVE_HOUR_ALLOWANCE),
+            ("7d", self.windows.week, WEEK_ALLOWANCE),
+            ("30d", self.windows.month, MONTH_ALLOWANCE),
+        ] {
+            let Some(percent) = percent else {
+                continue;
+            };
+            let score = f64::from(percent) * allowance;
+            if best.is_none_or(|(_, _, best_score)| score < best_score) {
+                best = Some((window, percent, score));
             }
         }
-        parts.join(" ")
+        if let Some((window, percent, _)) = best {
+            label.push(' ');
+            label.push_str(&format!("{window}{percent}%"));
+        }
+        label
     }
 }
 
@@ -178,11 +191,11 @@ fn provider_suffix(harness: Harness, provider: &str) -> Option<String> {
 }
 
 /// Pick the first non-empty `normal`/`warning`/`danger` token for a window
-/// family and return its percentage without the trailing `%`.
+/// family and return its percentage.
 ///
 /// `unknown` values are deliberately ignored: they read as `5h --`/`7d --`
 /// and would only add noise to the bar.
-fn window_percent(tokens: &BTreeMap<String, String>, base: &str) -> Option<String> {
+fn window_percent(tokens: &BTreeMap<String, String>, base: &str) -> Option<u8> {
     // Nested vendor heads in the Gauges layout publish `quota_share_*`
     // instead of `quota_*`. `quota_week_inline_*` is the pack when 5h is
     // hidden. Accept every spelling the publisher can produce.
@@ -204,8 +217,8 @@ fn window_percent(tokens: &BTreeMap<String, String>, base: &str) -> Option<Strin
             .split_whitespace()
             .find_map(|part| part.strip_suffix('%'))
         {
-            if !percent.is_empty() && percent.chars().all(|ch| ch.is_ascii_digit()) {
-                return Some(percent.to_string());
+            if let Ok(percent) = percent.parse::<u8>() {
+                return Some(percent);
             }
         }
     }
@@ -258,7 +271,7 @@ mod tests {
             ),
             pane(Harness::Cursor, &[("quota_model", "cursor")]),
         ];
-        assert_eq!(format_line(&panes), "OC 5h88% 7d95% · CL 5h61%");
+        assert_eq!(format_line(&panes), "OC 5h88% · CL 5h61%");
     }
 
     #[test]
@@ -283,6 +296,28 @@ mod tests {
     }
 
     #[test]
+    fn a_tight_week_outranks_an_ample_five_hour_window() {
+        let panes = vec![pane(
+            Harness::OpenCode,
+            &[
+                ("quota_provider", "OpenCode Go"),
+                ("quota_5h_normal", "5h 90% 4h"),
+                ("quota_week_normal", "7d 1% 6d"),
+            ],
+        )];
+        assert_eq!(format_line(&panes), "OC 7d1%");
+    }
+
+    #[test]
+    fn a_provider_with_only_a_weekly_window_shows_that_window() {
+        let panes = vec![pane(
+            Harness::Codex,
+            &[("quota_week_normal", "7d 100% 6d23h")],
+        )];
+        assert_eq!(format_line(&panes), "CX 7d100%");
+    }
+
+    #[test]
     fn merges_anonymous_and_provider_groups_for_one_harness() {
         let panes = vec![
             pane(Harness::Codex, &[("quota_5h_normal", "5h 42% 1h")]),
@@ -294,7 +329,7 @@ mod tests {
                 ],
             ),
         ];
-        assert_eq!(format_line(&panes), "CX 5h42% 7d70%");
+        assert_eq!(format_line(&panes), "CX 5h42%");
     }
 
     #[test]
@@ -307,7 +342,7 @@ mod tests {
                 ("quota_share_week_inline_normal", "7d 95% 2d14h"),
             ],
         )];
-        assert_eq!(format_line(&panes), "OC 5h88% 7d95%");
+        assert_eq!(format_line(&panes), "OC 5h88%");
     }
 
     #[test]
