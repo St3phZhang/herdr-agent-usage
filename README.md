@@ -188,6 +188,7 @@ herdr plugin pane open --plugin herdr-agent-usage --entrypoint settings --focus
 | StatusLine pace | On (default) preserves the existing binding-window pace segment; off leaves Claude's statusLine output unchanged |
 | Layout | `gauges` (default) adds a meter beside each quota number; `packed` groups related fields; `stacked` gives each field a row |
 | Color theme | `auto` (default) follows Herdr's `[theme]` and `auto_switch`; `dark` or `light` force one palette |
+| Quota bar | Off (default) keeps quota in the Agents sidebar; on restores Herdr's native Agents panel and puts a one-line quota summary in the tab bar |
 | Row gap | Zero or one blank line between agents |
 | Watch interval | 30 seconds–1 hour; default 60 seconds |
 | Fields | Provider, topic, model, context, short/long/monthly quota on by default; cache and TTL optional |
@@ -205,7 +206,16 @@ Enable sidebar pacing, or opt out of the separate Claude statusLine pace, during
 ./install.sh --sidebar-pacing on
 ./install.sh --statusline-pace off
 ./install.sh --theme auto
+./install.sh --quota-bar on
 ```
+
+Quota-bar mode restores Herdr's native Agents sidebar (session management) and
+adds one `ui.tab_bar_right` command entry. The entry calls the plugin's
+`quota-bar` subcommand every five seconds and prints only harnesses that have a
+live pane, for example `OC 5h88% 7d95% · CL 5h61%`. The tab bar strips ANSI
+styles, so the summary is plain text; use the quota popup or dashboard when you
+need colored meters and every window. `hide_tab_bar_when_single_tab = true`
+also hides this quota bar, so leave it off (or use `tab_bar_position = "bottom"`).
 
 Plugin-owned brand/status and quota-severity colors are resolved from Herdr's
 built-in theme palette. `auto` reads `[theme]` in Herdr's `config.toml`,

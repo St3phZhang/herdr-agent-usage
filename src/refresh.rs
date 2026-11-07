@@ -100,6 +100,11 @@ fn maybe_reapply_theme() {
     if event != "startup" && action != "refresh" {
         return;
     }
+    // The tab bar uses Herdr's own theme colors, and the native Agents panel
+    // has no plugin hexes to rewrite.
+    if crate::configure::resolved_quota_bar(None).is_on() {
+        return;
+    }
     let Ok(cache) = CacheStore::from_env() else {
         return;
     };
@@ -128,8 +133,18 @@ fn maybe_reapply_theme() {
     let fields = crate::configure::resolved_fields(None, Some(&cache));
     let brand = crate::configure::resolved_brand_colors(None, Some(&cache));
     let pane_titles = crate::configure::resolved_pane_titles(None, Some(&cache));
-    if crate::configure::herdr::apply(&agents, layout, gap, fields, brand, pane_titles, mode)
-        .is_err()
+    let quota_bar = crate::configure::resolved_quota_bar(None);
+    if crate::configure::herdr::apply(
+        &agents,
+        layout,
+        gap,
+        fields,
+        brand,
+        pane_titles,
+        mode,
+        quota_bar,
+    )
+    .is_err()
     {
         return;
     }
@@ -1013,8 +1028,16 @@ fn sidebar_shape(cache: &CacheStore) -> SidebarShape {
 
 /// The row style every pane in one pass is rendered with.
 fn publish_row(cache: &CacheStore) -> RowStyle {
+    // Quota-bar mode hides quota from the sidebar, so the user's field choice
+    // must not strip the tokens the tab-bar command reads. The native sidebar
+    // ignores these tokens either way.
+    let fields = if crate::configure::resolved_quota_bar(None).is_on() {
+        crate::cli::FieldSet::all()
+    } else {
+        cache.fields().unwrap_or_default()
+    };
     RowStyle {
-        fields: cache.fields().unwrap_or_default(),
+        fields,
         pacing: cache.sidebar_pacing().unwrap_or_default(),
         ..RowStyle::new(
             cache.percent_style().unwrap_or_default(),
@@ -4744,6 +4767,27 @@ mod tests {
             "after mark-seen, stale done token must not come back"
         );
         assert!(!cache.icon_attention().unseen.contains("w1:p2"));
+    }
+
+    #[test]
+    fn quota_bar_mode_publishes_every_quota_field_even_when_the_sidebar_hides_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = CacheStore::new(directory.path().join("state"));
+        crate::prefs::testing::with_config_dir(&directory.path().join("config"), || {
+            crate::prefs::write(crate::prefs::QUOTA_BAR, "on").unwrap();
+            crate::prefs::write(crate::prefs::FIELDS, "provider,model").unwrap();
+            cache
+                .set_fields(crate::cli::FieldSet::parse("provider,model").unwrap())
+                .unwrap();
+            let row = publish_row(&cache);
+            for field in [
+                crate::cli::SidebarField::FiveHour,
+                crate::cli::SidebarField::Week,
+                crate::cli::SidebarField::Month,
+            ] {
+                assert!(row.fields.contains(field), "{field:?} was stripped");
+            }
+        });
     }
 
     #[test]

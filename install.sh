@@ -7,6 +7,7 @@
 #   ./install.sh --watch-interval-seconds 300
 #   ./install.sh --sidebar-layout packed
 #   ./install.sh --theme auto
+#   ./install.sh --quota-bar on
 #   ./install.sh --pane-titles off
 #   ./install.sh --row-gap 0
 #   ./install.sh --quota-percent used
@@ -54,6 +55,10 @@
 # theme.auto_switch between the light and dark palettes. dark/light force one
 # palette when the host terminal's appearance report does not reach the plugin.
 #
+# --quota-bar off (default) keeps quota in the Agents sidebar. on restores
+# Herdr's native Agents panel for session management and puts a one-line quota
+# summary in ui.tab_bar_right instead.
+#
 # --agent-order quota (default) keeps each Space contiguous and ranks by
 # least quota left inside the space; tabs keeps tab order but draws the tabs
 # that share an account together. Both replace the panel's sort until it is
@@ -82,6 +87,7 @@ WATCH_INTERVAL_SECONDS=""
 AGENTS=""
 SIDEBAR_LAYOUT=""
 THEME=""
+QUOTA_BAR=""
 PANE_TITLES=""
 ROW_GAP=""
 QUOTA_PERCENT=""
@@ -111,6 +117,11 @@ while (($# > 0)); do
     --theme)
       (($# >= 2)) || { printf 'error: missing value for %s\n' "$1" >&2; exit 1; }
       THEME="$2"
+      shift 2
+      ;;
+    --quota-bar)
+      (($# >= 2)) || { printf 'error: missing value for %s\n' "$1" >&2; exit 1; }
+      QUOTA_BAR="$2"
       shift 2
       ;;
     --pane-titles)
@@ -162,7 +173,7 @@ while (($# > 0)); do
       shift 2
       ;;
     -h|--help)
-      sed -n '2,63p' "$0"
+      sed -n '2,80p' "$0"
       exit 0
       ;;
     *)
@@ -187,6 +198,10 @@ esac
 case "$THEME" in
   ""|auto|dark|light) ;;
   *) die "theme must be auto, dark, or light" ;;
+esac
+case "$QUOTA_BAR" in
+  ""|on|off) ;;
+  *) die "quota-bar must be on or off" ;;
 esac
 case "$PANE_TITLES" in
   ""|on|off) ;;
@@ -248,6 +263,7 @@ write_plugin_pref agents "$(agents_pref_value "$AGENTS")"
 write_plugin_pref watch-interval-seconds "$WATCH_INTERVAL_SECONDS"
 write_plugin_pref sidebar-layout "$SIDEBAR_LAYOUT"
 write_plugin_pref theme "$THEME"
+write_plugin_pref quota-bar "$QUOTA_BAR"
 write_plugin_pref pane-titles "$PANE_TITLES"
 write_plugin_pref row-gap "$ROW_GAP"
 write_plugin_pref quota-percent "$QUOTA_PERCENT"

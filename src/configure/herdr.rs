@@ -1,6 +1,6 @@
 use crate::cli::{
-    AgentSelection, BrandColors, FieldSet, PaneTitles, SidebarField, SidebarLayout, SidebarRowGap,
-    ThemeMode,
+    AgentSelection, BrandColors, FieldSet, PaneTitles, QuotaBarMode, SidebarField, SidebarLayout,
+    SidebarRowGap, ThemeMode,
 };
 use crate::identity::{self, PLUGIN_ID};
 use crate::model::Harness;
@@ -158,6 +158,7 @@ fn selected_providers(agents: &[Harness]) -> impl Iterator<Item = &'static str> 
         .map(|(_, provider)| provider)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn check(
     agents: &[Harness],
     layout: SidebarLayout,
@@ -166,9 +167,21 @@ pub fn check(
     brand: BrandColors,
     pane_titles: PaneTitles,
     theme_mode: ThemeMode,
+    quota_bar: QuotaBarMode,
 ) -> Result<()> {
     let path = config_path()?;
     let original = fs::read_to_string(&path).unwrap_or_default();
+    if quota_bar.is_on() {
+        let updated = rewrite_quota_bar_mode(&original)?;
+        if updated == original {
+            println!("Herdr quota bar already configured: {}", path.display());
+        } else {
+            println!("Herdr quota bar preview for {}:", path.display());
+            println!("  restore the native Herdr Agents sidebar");
+            println!("  add a quota summary to the tab bar's right side");
+        }
+        return Ok(());
+    }
     let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
     let (updated, skipped) = rewrite_quota_sidebar_with_titles(
         &original,
@@ -199,6 +212,7 @@ pub fn check(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply(
     agents: &[Harness],
     layout: SidebarLayout,
@@ -207,21 +221,26 @@ pub fn apply(
     brand: BrandColors,
     pane_titles: PaneTitles,
     theme_mode: ThemeMode,
+    quota_bar: QuotaBarMode,
 ) -> Result<()> {
     let path = config_path()?;
     let existed = path.exists();
     let original = fs::read_to_string(&path).unwrap_or_default();
-    let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
-    let (updated, skipped) = rewrite_quota_sidebar_with_titles(
-        &original,
-        agents,
-        layout,
-        row_gap,
-        fields,
-        brand,
-        pane_titles,
-        &palette,
-    )?;
+    let (updated, skipped) = if quota_bar.is_on() {
+        (rewrite_quota_bar_mode(&original)?, Vec::new())
+    } else {
+        let palette = theme::resolve_with(&original, theme_mode, theme::detect_appearance());
+        rewrite_quota_sidebar_with_titles(
+            &original,
+            agents,
+            layout,
+            row_gap,
+            fields,
+            brand,
+            pane_titles,
+            &palette,
+        )?
+    };
     if let Some(line) = skipped_provider_notice(&skipped) {
         println!("{line}");
     }
@@ -235,7 +254,11 @@ pub fn apply(
         fs::create_dir_all(parent).context("create Herdr config directory")?;
     }
     fs::write(&path, updated).context("write Herdr config")?;
-    println!("Added quota sidebar row to {}", path.display());
+    if quota_bar.is_on() {
+        println!("Added quota bar to {}", path.display());
+    } else {
+        println!("Added quota sidebar row to {}", path.display());
+    }
     Ok(())
 }
 
@@ -638,6 +661,7 @@ fn rewrite_quota_sidebar_with_titles(
             .parse::<DocumentMut>()
             .context("parse Herdr TOML config")?
     };
+    remove_quota_bar_entry(&mut document);
     add_plugin_keybinding(
         &mut document,
         REFRESH_KEY,
@@ -933,6 +957,208 @@ pub fn remove_quota_row(input: &str) -> Result<String> {
     remove_quota_row_for(input, &AgentSelection::SUPPORTED, true)
 }
 
+/// Quota-bar mode: keep Herdr's Agents panel native and add one tab-bar
+/// command entry. The plugin still publishes quota tokens; they are simply not
+/// rendered in the sidebar.
+fn rewrite_quota_bar_mode(input: &str) -> Result<String> {
+    let mut document = if input.trim().is_empty() {
+        DocumentMut::new()
+    } else {
+        input
+            .parse::<DocumentMut>()
+            .context("parse Herdr TOML config")?
+    };
+    add_plugin_keybinding(
+        &mut document,
+        REFRESH_KEY,
+        &identity::refresh_action(),
+        "refresh all agent quotas",
+    )?;
+    add_plugin_keybinding(
+        &mut document,
+        SETTINGS_KEY,
+        &identity::settings_action(),
+        "open agent quota settings",
+    )?;
+    remove_plugin_keybinding(&mut document, TOGGLE_ORDER_KEY);
+    restore_native_sidebar(&mut document)?;
+    add_quota_bar_entry(&mut document)?;
+    Ok(document.to_string())
+}
+
+/// Remove every sidebar row this plugin owns and put Herdr's own identity +
+/// `agent` rows back. User-owned rows survive; quota tokens are stripped even
+/// from them so no plugin quota leaks into the native Agents panel.
+fn restore_native_sidebar(document: &mut DocumentMut) -> Result<()> {
+    if let Some(table) = document
+        .get_mut("ui")
+        .and_then(Item::as_table_mut)
+        .and_then(|ui| ui.get_mut("sidebar"))
+        .and_then(Item::as_table_mut)
+        .and_then(|sidebar| sidebar.get_mut("agents"))
+        .and_then(Item::as_table_mut)
+    {
+        remove_managed_provider_rows(table, &AgentSelection::SUPPORTED);
+        let managed_rows = table
+            .get("rows")
+            .and_then(Item::as_value)
+            .is_some_and(has_rows_marker);
+        if let Some(rows) = table.get_mut("rows").and_then(Item::as_array_mut) {
+            let mut retained = Array::new();
+            for row in rows.iter() {
+                let cleaned = strip_quota_tokens(row);
+                if managed_rows && is_managed_caption_row(&cleaned) {
+                    continue;
+                }
+                if !cleaned.is_empty() {
+                    retained.push(Value::Array(cleaned));
+                }
+            }
+            let only_native_identity = retained.iter().all(|row| {
+                row.as_array().is_some_and(|items| {
+                    is_official_identity_row(items)
+                        || (items.len() == 1
+                            && items.get(0).and_then(Value::as_str) == Some("state_icon"))
+                })
+            });
+            if retained.is_empty() || only_native_identity {
+                let mut restored = official_agent_rows();
+                restored.push(herdr_native_agent_row());
+                table["rows"] = Item::Value(Value::Array(restored));
+            } else {
+                if retained.len() == 1
+                    && retained
+                        .get(0)
+                        .and_then(Value::as_array)
+                        .is_some_and(is_official_identity_row)
+                {
+                    retained.push(herdr_native_agent_row());
+                }
+                table["rows"] = Item::Value(Value::Array(retained));
+            }
+        }
+        let managed_row_gap = table
+            .get("row_gap")
+            .and_then(Item::as_value)
+            .and_then(|value| value.decor().suffix())
+            .and_then(|suffix| suffix.as_str())
+            .is_some_and(identity::comment_owns);
+        if managed_row_gap {
+            table.remove("row_gap");
+        }
+    }
+    remove_managed_selection_theme(document);
+    remove_managed_panel_sort(document);
+    Ok(())
+}
+
+fn add_quota_bar_entry(document: &mut DocumentMut) -> Result<()> {
+    let command = quota_bar_command()?;
+    let ui = ensure_table(document, &["ui"])?;
+    let array = ui
+        .entry("tab_bar_right")
+        .or_insert(Item::Value(Value::Array(Array::new())))
+        .as_array_mut()
+        .context("Herdr ui.tab_bar_right must be an array")?;
+    let mut retained = Array::new();
+    for entry in array.iter() {
+        if !is_quota_bar_entry(entry) {
+            retained.push(entry.clone());
+        }
+    }
+    let mut entry = InlineTable::new();
+    entry.insert("type", Value::from("command"));
+    entry.insert("command", Value::from(command));
+    entry.insert("interval_seconds", Value::from(5i64));
+    entry.insert("timeout_seconds", Value::from(2i64));
+    let mut entry = Value::InlineTable(entry);
+    entry
+        .decor_mut()
+        .set_suffix(format!(" # {} quota-bar", PLUGIN_ID));
+    retained.push(entry);
+    *array = retained;
+    Ok(())
+}
+
+fn remove_quota_bar_entry(document: &mut DocumentMut) {
+    let Some(ui) = document.get_mut("ui").and_then(Item::as_table_mut) else {
+        return;
+    };
+    let Some(array) = ui.get_mut("tab_bar_right").and_then(Item::as_array_mut) else {
+        return;
+    };
+    let mut retained = Array::new();
+    for entry in array.iter() {
+        if !is_quota_bar_entry(entry) {
+            retained.push(entry.clone());
+        }
+    }
+    if retained.is_empty() {
+        ui.remove("tab_bar_right");
+    } else {
+        *array = retained;
+    }
+    if ui.is_empty() {
+        document.remove("ui");
+    }
+}
+
+fn is_quota_bar_entry(value: &Value) -> bool {
+    if value
+        .decor()
+        .suffix()
+        .and_then(|suffix| suffix.as_str())
+        .is_some_and(|suffix| suffix.contains("quota-bar"))
+    {
+        return true;
+    }
+    value
+        .as_inline_table()
+        .and_then(|table| table.get("command"))
+        .and_then(Value::as_str)
+        .is_some_and(|command| {
+            command.contains("quota-bar")
+                && (command.contains("herdr-agent-usage") || command.contains("herdr-agent-quota"))
+        })
+}
+
+fn quota_bar_command() -> Result<String> {
+    let executable = std::env::current_exe().context("resolve plugin executable")?;
+    Ok(format!("\"{}\" quota-bar", executable.display()))
+}
+
+fn remove_plugin_keybinding(document: &mut DocumentMut, key: &str) {
+    let Some(keys) = document.get_mut("keys").and_then(Item::as_table_mut) else {
+        return;
+    };
+    let Some(commands) = keys
+        .get_mut("command")
+        .and_then(Item::as_array_of_tables_mut)
+    else {
+        return;
+    };
+    let mut retained = ArrayOfTables::new();
+    for command in commands.iter() {
+        let same_key = command.get("key").and_then(Item::as_str) == Some(key);
+        let managed = command
+            .get("command")
+            .and_then(Item::as_str)
+            .is_some_and(identity::is_managed_keybinding);
+        if same_key && managed {
+            continue;
+        }
+        retained.push(command.clone());
+    }
+    if retained.is_empty() {
+        keys.remove("command");
+    } else {
+        keys["command"] = Item::ArrayOfTables(retained);
+    }
+    if keys.is_empty() {
+        document.remove("keys");
+    }
+}
+
 /// `full` means the whole plugin is being removed, so the shared base rows and
 /// the plugin keybindings go too. A narrower selection only drops that agent's
 /// own `rows_by_agent` entry and leaves the rest of the sidebar intact.
@@ -958,6 +1184,7 @@ pub fn remove_quota_row_for(input: &str, agents: &[Harness], full: bool) -> Resu
         .parse::<DocumentMut>()
         .context("parse Herdr TOML config")?;
     if full {
+        remove_quota_bar_entry(&mut document);
         remove_plugin_keybindings(&mut document);
     }
     let Some(table) = document
@@ -3984,5 +4211,84 @@ mod sidebar_width_tests {
             ],
             body,
         );
+    }
+
+    #[test]
+    fn quota_bar_mode_restores_native_agents_and_adds_one_tab_entry() {
+        let original = concat!(
+            "[ui]\n",
+            "tab_bar_right = [{ type = \"hostname\" }]\n",
+            "\n",
+            "[ui.sidebar.agents]\n",
+            "row_gap = 0 # herdr-agent-usage\n",
+            "rows = [[{ token = \"$quota_group\", bold = true, dim = false }], ",
+            "[\"state_icon\", { token = \"$quota_icon\", fg = \"#cdd6f4\", bold = false, dim = false }, ",
+            "{ token = \"$quota_provider\", bold = true, dim = false }]] # herdr-agent-usage-row\n",
+            "\n",
+            "[[keys.command]]\n",
+            "key = \"prefix+shift+o\"\n",
+            "type = \"plugin_action\"\n",
+            "command = \"herdr-agent-usage.toggle-agent-order\"\n",
+            "description = \"toggle agent order: quota / tabs\"\n",
+        );
+        let updated = rewrite_quota_bar_mode(original).unwrap();
+        assert!(
+            updated.contains(
+                "rows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]"
+            ),
+            "{updated}"
+        );
+        assert!(!updated.contains("$quota_icon"), "{updated}");
+        assert!(!updated.contains("prefix+shift+o"), "{updated}");
+        assert!(updated.contains("prefix+shift+r"), "{updated}");
+        assert!(updated.contains("prefix+shift+q"), "{updated}");
+        assert!(updated.contains("hostname"), "{updated}");
+        assert!(updated.contains("quota-bar"), "{updated}");
+        let document = updated.parse::<DocumentMut>().unwrap();
+        let entries = document["ui"]["tab_bar_right"].as_array().unwrap();
+        assert_eq!(entries.len(), 2, "{updated}");
+    }
+
+    #[test]
+    fn full_uninstall_removes_the_quota_bar_entry() {
+        let bar = rewrite_quota_bar_mode("").unwrap();
+        let removed = remove_quota_row(&bar).unwrap();
+        assert!(!removed.contains("tab_bar_right"), "{removed}");
+        assert!(!removed.contains("quota-bar"), "{removed}");
+    }
+
+    #[test]
+    fn quota_bar_mode_keeps_user_owned_sidebar_rows() {
+        let updated = rewrite_quota_bar_mode(
+            "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"], [\"$my_token\"]]\n",
+        )
+        .unwrap();
+        assert!(updated.contains("$my_token"), "{updated}");
+        assert!(updated.contains("state_icon"), "{updated}");
+        assert!(updated.contains("quota-bar"), "{updated}");
+    }
+
+    #[test]
+    fn leaving_quota_bar_mode_removes_the_tab_entry_and_restores_quota_rows() {
+        let native = rewrite_quota_bar_mode("").unwrap();
+        let sidebar = add_quota_row(&native).unwrap();
+        assert!(!sidebar.contains("tab_bar_right"), "{sidebar}");
+        assert!(sidebar.contains("$quota_icon"), "{sidebar}");
+        assert!(sidebar.contains("$quota_5h_normal"), "{sidebar}");
+    }
+
+    #[test]
+    fn quota_bar_removal_keeps_user_entries() {
+        let mut document = rewrite_quota_bar_mode(
+            "[ui]\ntab_bar_right = [{ type = \"hostname\" }, { type = \"text\", text = \"prod\" }]\n",
+        )
+        .unwrap()
+        .parse::<DocumentMut>()
+        .unwrap();
+        remove_quota_bar_entry(&mut document);
+        let entries = document["ui"]["tab_bar_right"].as_array().unwrap();
+        assert_eq!(entries.len(), 2, "{}", document);
+        assert!(document.to_string().contains("hostname"));
+        assert!(document.to_string().contains("prod"));
     }
 }

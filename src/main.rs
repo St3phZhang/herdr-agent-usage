@@ -41,6 +41,7 @@ fn main() -> Result<()> {
         Command::Focus => herdr_agent_quota::refresh::focus(),
         Command::Layout => herdr_agent_quota::refresh::layout(),
         Command::Dashboard => herdr_agent_quota::dashboard::run(),
+        Command::QuotaBar => herdr_agent_quota::quota_bar::run(),
         Command::Settings => herdr_agent_quota::settings::run(),
         Command::ToggleOrder => herdr_agent_quota::configure::toggle_agent_order(),
         Command::Configure {
@@ -60,6 +61,7 @@ fn main() -> Result<()> {
             agent_order,
             low_quota_alert,
             theme,
+            quota_bar,
         } => herdr_agent_quota::configure::run(
             check,
             apply,
@@ -78,6 +80,7 @@ fn main() -> Result<()> {
                 agent_order,
                 low_quota_alert,
                 theme,
+                quota_bar,
             },
         ),
         Command::ClaudeStatusline => herdr_agent_quota::configure::claude::run_statusline_hook(),

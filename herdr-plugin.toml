@@ -97,4 +97,4 @@ placement = "popup"
 # section opens below the fold.
 # Herdr clamps to the terminal, and the pane still scrolls when it has to.
 width = 78
-height = 40
+height = 41

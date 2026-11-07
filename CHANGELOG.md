@@ -27,6 +27,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Quota bar mode.** `--quota-bar on` restores Herdr's native Agents panel for
+  session management and adds one `ui.tab_bar_right` command entry. The entry
+  runs the plugin's `quota-bar` subcommand, which prints a compact one-line
+  summary of only the harnesses with live panes (`OC 5h88% 7d95% · CL 5h61%`).
+  Switching the mode back off removes the entry and restores the quota sidebar
+  rows.
 - **Theme-aware sidebar colors.** Brand status and quota severity hexes now
   come from Herdr's built-in theme (including `theme.auto_switch` and the
   `text`/`green`/`yellow`/`red`/`teal` overrides under `theme.custom`) instead

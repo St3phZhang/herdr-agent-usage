@@ -71,6 +71,9 @@ pub enum Command {
     Layout,
     /// Render the quota dashboard shown in the Herdr popup pane.
     Dashboard,
+    /// Print the one-line quota summary used by Herdr's tab bar.
+    #[command(hide = true)]
+    QuotaBar,
     /// Install, inspect, or remove this plugin's sidebar rows and collectors.
     ///
     /// With no flag this only reports what would change. Use `--agent` to work
@@ -152,6 +155,10 @@ pub enum Command {
         /// `theme.auto_switch` in Herdr's config.
         #[arg(long, value_enum)]
         theme: Option<ThemeMode>,
+        /// Move quota to a one-line Herdr tab-bar status entry and restore the
+        /// native Agents sidebar for session management.
+        #[arg(long, value_enum)]
+        quota_bar: Option<QuotaBarMode>,
     },
     /// Render the settings pane shown in the Herdr popup pane.
     Settings,
@@ -572,6 +579,7 @@ pub struct ConfigureOptions {
     pub agent_order: Option<AgentOrder>,
     pub low_quota_alert: Option<LowQuotaAlert>,
     pub theme: Option<ThemeMode>,
+    pub quota_bar: Option<QuotaBarMode>,
 }
 
 /// Whether recurring quota windows show quota or spending pace in the sidebar.
@@ -649,6 +657,50 @@ impl StatuslinePace {
         match name.trim().to_ascii_lowercase().as_str() {
             "off" | "false" => Some(Self::Off),
             "on" | "true" => Some(Self::On),
+            _ => None,
+        }
+    }
+
+    pub fn from_arg_or_env(value: Option<Self>) -> Option<Self> {
+        if value.is_some() {
+            return value;
+        }
+        std::env::var(Self::ENV)
+            .ok()
+            .as_deref()
+            .and_then(Self::parse)
+    }
+}
+
+/// Whether quota lives in the Agents sidebar or in Herdr's tab bar.
+///
+/// `on` restores the native Herdr Agents panel for session management and
+/// moves the quota summary to a `ui.tab_bar_right` command entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+pub enum QuotaBarMode {
+    #[default]
+    Off,
+    On,
+}
+
+impl QuotaBarMode {
+    pub const ENV: &'static str = "HERDR_AGENT_QUOTA_BAR";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+        }
+    }
+
+    pub fn is_on(self) -> bool {
+        self == Self::On
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "off" | "false" | "sidebar" => Some(Self::Off),
+            "on" | "true" | "bar" => Some(Self::On),
             _ => None,
         }
     }
@@ -1219,6 +1271,16 @@ impl AgentSelection {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_quota_bar_mode_round_trips_through_its_stored_form() {
+        assert_eq!(QuotaBarMode::parse("on"), Some(QuotaBarMode::On));
+        assert_eq!(QuotaBarMode::parse("bar"), Some(QuotaBarMode::On));
+        assert_eq!(QuotaBarMode::parse("off"), Some(QuotaBarMode::Off));
+        assert_eq!(QuotaBarMode::parse("sidebar"), Some(QuotaBarMode::Off));
+        assert_eq!(QuotaBarMode::parse("sometimes"), None);
+        assert!(!QuotaBarMode::default().is_on());
+    }
 
     #[test]
     fn a_theme_mode_round_trips_through_its_stored_form() {

@@ -10,7 +10,8 @@ mod statusline;
 use crate::cache::CacheStore;
 use crate::cli::{
     AgentOrder, AgentSelection, BrandColors, ConfigureOptions, FieldSet, LowQuotaAlert, PaneTitles,
-    PercentStyle, SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace, ThemeMode,
+    PercentStyle, QuotaBarMode, SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace,
+    ThemeMode,
 };
 use crate::model::Harness;
 use crate::prefs;
@@ -141,6 +142,8 @@ pub fn run(
         let brand = resolved_brand_colors(options.brand_colors, Some(&cache));
         let theme = resolved_theme(options.theme);
         prefs::write(prefs::THEME, theme.as_str())?;
+        let quota_bar = resolved_quota_bar(options.quota_bar);
+        prefs::write(prefs::QUOTA_BAR, quota_bar.as_str())?;
         let alert = resolved_low_quota_alert(options.low_quota_alert, Some(&cache));
         // A new threshold has never warned about anything yet. Without this,
         // lowering it would stay silent for a provider already warned about at
@@ -150,9 +153,20 @@ pub fn run(
         }
         cache.set_low_quota_alert(alert)?;
         prefs::write(prefs::LOW_QUOTA_ALERT, &alert.to_string())?;
-        herdr::apply(agents, layout, gap, fields, brand, pane_titles, theme)?;
-        for note in font::install(cache.root())? {
-            println!("{note}");
+        herdr::apply(
+            agents,
+            layout,
+            gap,
+            fields,
+            brand,
+            pane_titles,
+            theme,
+            quota_bar,
+        )?;
+        if !quota_bar.is_on() {
+            for note in font::install(cache.root())? {
+                println!("{note}");
+            }
         }
         // Not gated on a full run, unlike the watcher: the Agent panel order
         // is a choice that arrives on this command line, and the settings pane
@@ -162,7 +176,13 @@ pub fn run(
         let order = resolved_agent_order(options.agent_order, Some(&cache));
         cache.set_agent_order(order)?;
         prefs::write(prefs::AGENT_ORDER, order.as_str())?;
-        apply_agent_order(order);
+        if quota_bar.is_on() {
+            // The native Agents panel owns its own ordering in quota-bar
+            // mode; a plugin-installed view would stop it being native.
+            apply_agent_order(AgentOrder::Default);
+        } else {
+            apply_agent_order(order);
+        }
         if agents.contains(&Harness::Claude) {
             claude::apply_with_refresh_interval(interval)?;
         }
@@ -187,9 +207,20 @@ pub fn run(
         let fields = resolved_fields(options.fields, cache.as_ref());
         let brand = resolved_brand_colors(options.brand_colors, cache.as_ref());
         let theme = resolved_theme(options.theme);
+        let quota_bar = resolved_quota_bar(options.quota_bar);
         let order = resolved_agent_order(options.agent_order, cache.as_ref());
         let alert = resolved_low_quota_alert(options.low_quota_alert, cache.as_ref());
-        herdr::check(agents, layout, gap, fields, brand, pane_titles, theme)?;
+        herdr::check(
+            agents,
+            layout,
+            gap,
+            fields,
+            brand,
+            pane_titles,
+            theme,
+            quota_bar,
+        )?;
+        println!("Quota bar: {}.", quota_bar.as_str());
         println!("Quota percentages show {} quota.", percent.suffix());
         println!("Sidebar pacing: {}.", pacing.as_str());
         println!("Claude statusLine pace: {}.", statusline_pace.as_str());
@@ -313,6 +344,12 @@ pub(crate) fn resolved_theme(explicit: Option<ThemeMode>) -> ThemeMode {
         .unwrap_or_default()
 }
 
+pub(crate) fn resolved_quota_bar(explicit: Option<QuotaBarMode>) -> QuotaBarMode {
+    QuotaBarMode::from_arg_or_env(explicit)
+        .or_else(|| prefs::read(prefs::QUOTA_BAR).and_then(|value| QuotaBarMode::parse(&value)))
+        .unwrap_or_default()
+}
+
 /// Hand Herdr the Agent view the user asked for, or give the panel back.
 ///
 /// Never fatal. The rows and collectors are already written by the time this
@@ -335,6 +372,10 @@ pub(crate) fn apply_agent_order(order: AgentOrder) {
 /// under the new order before Herdr sorts by it. That pass is the ordinary
 /// debounced refresh, one metadata write per pane whose key moved.
 pub fn toggle_agent_order() -> Result<()> {
+    if resolved_quota_bar(None).is_on() {
+        println!("Agent order is native while the quota bar is enabled.");
+        return Ok(());
+    }
     let cache = CacheStore::from_env()?;
     let order = resolved_agent_order(None, Some(&cache)).toggled();
     cache.set_agent_order(order)?;

@@ -13,8 +13,8 @@
 
 use crate::cache::CacheStore;
 use crate::cli::{
-    AgentOrder, AgentSelection, FieldSet, LowQuotaAlert, PaneTitles, PercentStyle, SidebarField,
-    SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace, ThemeMode,
+    AgentOrder, AgentSelection, FieldSet, LowQuotaAlert, PaneTitles, PercentStyle, QuotaBarMode,
+    SidebarField, SidebarLayout, SidebarPacing, SidebarRowGap, StatuslinePace, ThemeMode,
 };
 use crate::model::Harness;
 use crate::prefs;
@@ -45,6 +45,7 @@ enum Choice {
     StatuslinePace,
     Layout,
     Theme,
+    QuotaBar,
     PaneTitles,
     RowGap,
     Interval,
@@ -60,6 +61,7 @@ impl Choice {
             Self::StatuslinePace => "StatusLine pace",
             Self::Layout => "Sidebar layout",
             Self::Theme => "Color theme",
+            Self::QuotaBar => "Quota bar",
             Self::PaneTitles => "Pane titles",
             Self::RowGap => "Row gap",
             Self::Interval => "Watch interval",
@@ -77,6 +79,7 @@ fn rows() -> Vec<Row> {
         Row::Choice(Choice::StatuslinePace),
         Row::Choice(Choice::Layout),
         Row::Choice(Choice::Theme),
+        Row::Choice(Choice::QuotaBar),
         Row::Choice(Choice::PaneTitles),
         Row::Choice(Choice::RowGap),
         Row::Choice(Choice::Interval),
@@ -98,6 +101,7 @@ pub struct Settings {
     statusline_pace: StatuslinePace,
     layout: SidebarLayout,
     theme: ThemeMode,
+    quota_bar: QuotaBarMode,
     pane_titles: PaneTitles,
     gap: SidebarRowGap,
     interval_seconds: u64,
@@ -124,6 +128,7 @@ impl Settings {
             statusline_pace: crate::configure::resolved_statusline_pace(None, cache),
             layout: crate::configure::resolved_sidebar_layout(None, cache),
             theme: crate::configure::resolved_theme(None),
+            quota_bar: crate::configure::resolved_quota_bar(None),
             pane_titles: crate::configure::resolved_pane_titles(None, cache),
             gap: crate::configure::resolved_row_gap(None, cache),
             interval_seconds: cache
@@ -143,6 +148,7 @@ impl Settings {
             Choice::StatuslinePace => self.statusline_pace.as_str().to_string(),
             Choice::Layout => self.layout.as_str().to_string(),
             Choice::Theme => self.theme.as_str().to_string(),
+            Choice::QuotaBar => self.quota_bar.as_str().to_string(),
             Choice::PaneTitles => self.pane_titles.as_str().to_string(),
             Choice::RowGap => self.gap.to_string(),
             Choice::Interval => format_interval(self.interval_seconds),
@@ -185,6 +191,10 @@ impl Settings {
                 ThemeMode::Dark => "force the dark palette",
                 ThemeMode::Light => "force the light palette",
             },
+            Choice::QuotaBar => match self.quota_bar {
+                QuotaBarMode::Off => "quota stays in the Agents sidebar",
+                QuotaBarMode::On => "native Agents panel + tab-bar quota",
+            },
             Choice::PaneTitles => match self.pane_titles {
                 PaneTitles::On => "scrolling title replaces topic",
                 PaneTitles::Off => "keep the extracted topic",
@@ -195,6 +205,7 @@ impl Settings {
             },
             Choice::Interval => "polled while an agent is working",
             Choice::Order => match self.order {
+                _ if self.quota_bar.is_on() => "native while the quota bar is on",
                 AgentOrder::Default => "Herdr's own policy",
                 AgentOrder::Quota => "by Space, least quota left first",
                 AgentOrder::Tabs => "tab order, one account together",
@@ -266,6 +277,12 @@ impl Settings {
                 let count = ThemeMode::CHOICES.len() as i8;
                 let next = (current as i8 + step).rem_euclid(count);
                 self.theme = ThemeMode::CHOICES[next as usize];
+            }
+            Row::Choice(Choice::QuotaBar) => {
+                self.quota_bar = match self.quota_bar {
+                    QuotaBarMode::Off => QuotaBarMode::On,
+                    QuotaBarMode::On => QuotaBarMode::Off,
+                }
             }
             Row::Choice(Choice::PaneTitles) => {
                 self.pane_titles = match self.pane_titles {
@@ -339,6 +356,8 @@ impl Settings {
             self.layout.as_str().to_string(),
             "--theme".to_string(),
             self.theme.as_str().to_string(),
+            "--quota-bar".to_string(),
+            self.quota_bar.as_str().to_string(),
             "--pane-titles".to_string(),
             self.pane_titles.as_str().to_string(),
             "--row-gap".to_string(),
@@ -678,6 +697,7 @@ mod tests {
             statusline_pace: StatuslinePace::Off,
             layout: SidebarLayout::Gauges,
             theme: ThemeMode::Auto,
+            quota_bar: QuotaBarMode::Off,
             pane_titles: PaneTitles::On,
             gap: SidebarRowGap::SEPARATED,
             interval_seconds: 60,
@@ -764,6 +784,15 @@ mod tests {
             draft.cycle(Row::Choice(Choice::Theme), 1);
         }
         assert_eq!(draft.theme, ThemeMode::Dark);
+    }
+
+    #[test]
+    fn the_quota_bar_flips_in_both_directions() {
+        let mut draft = settings();
+        draft.cycle(Row::Choice(Choice::QuotaBar), 1);
+        assert_eq!(draft.quota_bar, QuotaBarMode::On);
+        draft.cycle(Row::Choice(Choice::QuotaBar), -1);
+        assert_eq!(draft.quota_bar, QuotaBarMode::Off);
     }
 
     #[test]
@@ -859,6 +888,8 @@ mod tests {
                 "gauges",
                 "--theme",
                 "auto",
+                "--quota-bar",
+                "off",
                 "--pane-titles",
                 "on",
                 "--row-gap",
