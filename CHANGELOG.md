@@ -34,8 +34,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   provider shows one window: OpenCode Go's official allowance is 20% of the
   monthly limit for 5h and 50% for 7d, so the bar normalizes remaining
   percentages to monthly-allowance units and picks the tighter window.
-  Switching the mode back off removes the entry and restores the quota sidebar
-  rows.
+  Harness blocks use a fixed reverse-alphabetical display-name order, so focus
+  changes do not reshuffle the bar. Switching the mode back off removes the
+  entry and restores the quota sidebar rows.
 - **Theme-aware sidebar colors.** Brand status and quota severity hexes now
   come from Herdr's built-in theme (including `theme.auto_switch` and the
   `text`/`green`/`yellow`/`red`/`teal` overrides under `theme.custom`) instead

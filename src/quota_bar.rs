@@ -72,6 +72,15 @@ pub fn format_line(panes: &[AgentPane]) -> String {
         index += 1;
     }
 
+    // Herdr's agent inventory follows focus and Space order, which changes as
+    // the user works. The bar is a stable status surface, so sort by a fixed
+    // harness order (and provider name inside one harness) instead.
+    groups.sort_by(|left, right| {
+        harness_rank(left.harness)
+            .cmp(&harness_rank(right.harness))
+            .then_with(|| left.provider.cmp(&right.provider))
+    });
+
     let mut counts = HashMap::new();
     for group in &groups {
         *counts.entry(group.harness).or_insert(0usize) += 1;
@@ -156,6 +165,31 @@ impl Group {
         }
         label
     }
+}
+
+/// Left-to-right order in the bar: reverse alphabetical by display name.
+/// Fixed regardless of pane order or focus. Reverse order keeps OpenCode
+/// before the C harnesses, which is the order this bar's users see today.
+const HARNESS_ORDER: [Harness; 12] = [
+    Harness::Pi,
+    Harness::OpenCode,
+    Harness::Omp,
+    Harness::Muse,
+    Harness::Mimo,
+    Harness::Kilo,
+    Harness::Grok,
+    Harness::Devin,
+    Harness::Cursor,
+    Harness::Codex,
+    Harness::Claude,
+    Harness::Agy,
+];
+
+fn harness_rank(harness: Harness) -> usize {
+    HARNESS_ORDER
+        .iter()
+        .position(|candidate| *candidate == harness)
+        .unwrap_or(usize::MAX)
 }
 
 fn short_harness(harness: Harness) -> &'static str {
@@ -293,6 +327,25 @@ mod tests {
             ),
         ];
         assert_eq!(format_line(&panes), "OC:Go 5h88% · OC:Zen 5h40%");
+    }
+
+    #[test]
+    fn harness_order_is_fixed_regardless_of_inventory_order() {
+        let mut panes = vec![
+            pane(Harness::Codex, &[("quota_week_normal", "7d 100% 6d23h")]),
+            pane(
+                Harness::OpenCode,
+                &[
+                    ("quota_provider", "OpenCode Go"),
+                    ("quota_5h_normal", "5h 94% 3h"),
+                ],
+            ),
+            pane(Harness::Claude, &[("quota_5h_normal", "5h 61% 2h")]),
+        ];
+        let expected = "OC 5h94% · CX 7d100% · CL 5h61%";
+        assert_eq!(format_line(&panes), expected);
+        panes.reverse();
+        assert_eq!(format_line(&panes), expected);
     }
 
     #[test]

@@ -181,7 +181,7 @@ Claude 状态栏节奏是独立开关，默认开启以保持升级前行为；�
 
 插件自有的品牌状态色和额度严重度色会从 Herdr 的内置主题解析。`auto` 会读取 Herdr `config.toml` 的 `[theme]`（包括 `auto_switch`、`dark_name`、`light_name`，以及 `theme.custom` 下的 `text`、`green`、`yellow`、`red`、`teal`）；`dark` / `light` 用于终端没有把明暗外观传给插件时强制指定。更换 Herdr 主题后，按一次刷新键（`prefix+shift+r`）、执行 **Install / repair**，或在设置里应用一次，即可重写十六进制颜色；Herdr 不会为换主题发出插件事件。
 
-Quota bar 模式会恢复 Herdr 原生 Agents 侧栏（继续负责 session 管理），并在 `ui.tab_bar_right` 加一个命令条目。该命令每 5 秒调用插件的 `quota-bar` 子命令，只输出当前有 live pane 的 harness，例如 `OC 5h88% · CX 7d100%`。每个 provider 只显示一个窗口。OpenCode Go 官方定义 5h 额度为月额度的 20%，7d 为 50%，月额度为 100%；bar 会把剩余百分比换算成月额度份额，选择剩余最少的那一个。因此 5h 和 7d 都很充裕时优先显示 5h，而 7d 很低时优先显示 7d。tab bar 会剥掉 ANSI 样式，所以摘要只能是纯文本；需要彩色进度条和完整窗口时请用额度弹窗或 dashboard。`hide_tab_bar_when_single_tab = true` 会连 quota bar 一起隐藏，请保持关闭，或把 `tab_bar_position` 设为 `"bottom"`。
+Quota bar 模式会恢复 Herdr 原生 Agents 侧栏（继续负责 session 管理），并在 `ui.tab_bar_right` 加一个命令条目。该命令每 5 秒调用插件的 `quota-bar` 子命令，只输出当前有 live pane 的 harness，例如 `OC 5h88% · CX 7d100%`。每个 provider 只显示一个窗口。OpenCode Go 官方定义 5h 额度为月额度的 20%，7d 为 50%，月额度为 100%；bar 会把剩余百分比换算成月额度份额，选择剩余最少的那一个。因此 5h 和 7d 都很充裕时优先显示 5h，而 7d 很低时优先显示 7d。harness 块按显示名逆字母序排列，所以焦点或 Space 顺序变化时 bar 不会跳来跳去。tab bar 会剥掉 ANSI 样式，所以摘要只能是纯文本；需要彩色进度条和完整窗口时请用额度弹窗或 dashboard。`hide_tab_bar_when_single_tab = true` 会连 quota bar 一起隐藏，请保持关闭，或把 `tab_bar_position` 设为 `"bottom"`。
 
 ## 数据来源与边界
 

@@ -217,9 +217,10 @@ window. OpenCode Go defines the 5-hour allowance as 20% of the monthly limit,
 the weekly allowance as 50%, and the monthly limit as 100%; the bar compares
 remaining percentages in those monthly-allowance units and shows the window
 with the least headroom. A plentiful 5h therefore wins over a plentiful 7d,
-while a low 7d wins over a high 5h. The tab bar strips ANSI styles, so the
-summary is plain text; use the quota popup or dashboard when you need colored
-meters and every window. `hide_tab_bar_when_single_tab = true` also hides this
+while a low 7d wins over a high 5h. Harness blocks are reverse alphabetical by
+display name, so the bar does not reorder when focus or Space order changes.
+The tab bar strips ANSI styles, so the summary is plain text; use the quota
+popup or dashboard when you need colored meters and every window. `hide_tab_bar_when_single_tab = true` also hides this
 quota bar, so leave it off (or use `tab_bar_position = "bottom"`).
 
 Plugin-owned brand/status and quota-severity colors are resolved from Herdr's

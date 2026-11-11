@@ -1103,6 +1103,8 @@ fn remove_quota_bar_entry(document: &mut DocumentMut) {
     }
 }
 
+const QUOTA_BAR_COMMAND_MARKER: &str = "herdr-agent-usage-quota-bar";
+
 fn is_quota_bar_entry(value: &Value) -> bool {
     if value
         .decor()
@@ -1117,14 +1119,22 @@ fn is_quota_bar_entry(value: &Value) -> bool {
         .and_then(|table| table.get("command"))
         .and_then(Value::as_str)
         .is_some_and(|command| {
-            command.contains("quota-bar")
-                && (command.contains("herdr-agent-usage") || command.contains("herdr-agent-quota"))
+            command.contains(QUOTA_BAR_COMMAND_MARKER)
+                || (command.contains("quota-bar")
+                    && (command.contains("herdr-agent-usage")
+                        || command.contains("herdr-agent-quota")))
         })
 }
 
 fn quota_bar_command() -> Result<String> {
     let executable = std::env::current_exe().context("resolve plugin executable")?;
-    Ok(format!("\"{}\" quota-bar", executable.display()))
+    // The trailing shell comment is the stable ownership marker. The binary
+    // path itself can change (tests, relinks, renamed installs), and a
+    // toml_edit comment on an inline-array element is not always preserved.
+    Ok(format!(
+        "\"{}\" quota-bar # {QUOTA_BAR_COMMAND_MARKER}",
+        executable.display()
+    ))
 }
 
 fn remove_plugin_keybinding(document: &mut DocumentMut, key: &str) {
